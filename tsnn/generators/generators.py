@@ -59,7 +59,7 @@ class Generator:
         corr_with_y *= np.random.choice([-1, 1], self.n_f)
         # zero out some of the features correl
         corr_with_y[int(self.n_f * pct_zero_corr):] = 0
-        self.corr_with_y = torch.tensor(corr_with_y)
+        self.corr_with_y = torch.tensor(corr_with_y, dtype=torch.float32)
 
         X = np.array([np.random.multivariate_normal(mean=np.zeros(self.n_ts),
                                                     cov=self.generate_covar(self.n_ts),
@@ -67,9 +67,10 @@ class Generator:
         X = torch.from_numpy(X)
         X = torch.transpose(X, 0, 1)
         X = torch.transpose(X, 1, 2)
+        X = X.to(dtype=torch.float32)
 
         self.y_pred_optimal = X @ self.corr_with_y
-        return X, torch.from_numpy(y)
+        return X, torch.from_numpy(y).to(dtype=torch.float32)
 
     def np_to_torch(self, X, y, train_test_split=True, train_pct=0.7, batch_size=64):
         """
