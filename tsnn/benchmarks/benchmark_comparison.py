@@ -1,4 +1,6 @@
 import pandas as pd
+from .. import utils
+
 
 class Comparator:
     def __init__(self, models: list, model_names=None):
@@ -10,8 +12,7 @@ class Comparator:
         else:
             self.model_names = model_names
 
-
-    def correl(self, X, y_true, y_optimal):
+    def correl(self, dataloader, y_optimal=None):
         """
         Correl matrix of all models, true y and optimal prediction
         :param X: data to predict
@@ -19,9 +20,11 @@ class Comparator:
         :param y_optimal: optimal y (computed in generator)
         :return:
         """
-        res = [pd.Series(y_true).rename('y_true'), pd.Series(y_optimal).rename('y_optimal')]
+        X, y_true = utils.torch_to_np(dataloader)
+        res = [pd.Series(y_true).rename('y_true')]
+        if y_optimal is not None:
+            res.append(pd.Series(y_optimal).rename('y_optimal'))
+
         for k in range(len(self.models)):
-            res.append(pd.Series(self.models[k].predict(X)).rename(self.model_names[k]))
+            res.append(pd.Series(self.models[k].predict(dataloader)).rename(self.model_names[k]))
         return pd.concat(res, axis=1).corr()
-
-
