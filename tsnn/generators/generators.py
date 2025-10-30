@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, random_split
 from torch.utils.data import DataLoader
-
+from torch.nn import TransformerEncoder
 
 class TorchDataset(Dataset):
     def __init__(self, X, y):
@@ -27,6 +27,8 @@ class Generator:
         self.n_ts = n_ts
         self.n_f = n_f
         self.T = T
+        self.corr_with_y = None
+        self.y_pred_optimal = None
 
     def generate_covar(self, n: int) -> torch.tensor:
         """
@@ -47,6 +49,7 @@ class Generator:
         """
         # todo: add some conditioning predictive power (only direct correlation of features for now)
         # todo: add non-linear dependencies
+        # todo: add lead-lag alpha between time series
         # random y
         y = np.random.multivariate_normal(mean=np.zeros(self.n_ts),
                                           cov=self.generate_covar(self.n_ts),
@@ -56,6 +59,7 @@ class Generator:
         corr_with_y *= np.random.choice([-1, 1], self.n_f)
         # zero out some of the features correl
         corr_with_y[int(self.n_f * pct_zero_corr):] = 0
+        self.corr_with_y = torch.tensor(corr_with_y)
 
         X = np.array([np.random.multivariate_normal(mean=np.zeros(self.n_ts),
                                                     cov=self.generate_covar(self.n_ts),
@@ -63,6 +67,8 @@ class Generator:
         X = torch.from_numpy(X)
         X = torch.transpose(X, 0, 1)
         X = torch.transpose(X, 1, 2)
+
+        self.y_pred_optimal = X @ self.corr_with_y
         return X, torch.from_numpy(y)
 
     def np_to_torch(self, X, y, train_test_split=True, train_pct=0.7, batch_size=64):
@@ -87,14 +93,13 @@ class Generator:
         else:
             return DataLoader(full_data, batch_size=batch_size, shuffle=True)
 
-    def torch_to_np(sel, X, y):
+    def torch_to_np(sel, d):
         """
         converts a torch dataset to a numpy matrix on which usual ML algo can be applied
-        :param X:
-        :param y:
-        :return:
+        :param d: pytorch dataset
+        :return: X, y as numpy arrays
         """
-        X_np, y_np = X.dataset.dataset.X, y.dataset.datset.y
+        X_np, y_np = d.dataset.dataset.X, d.dataset.dataset.y
         X_np = torch.reshape(X_np, (X_np.shape[0] * X_np.shape[1], X_np.shape[2]))
-        y_np = torch.reshape(y_np, (y_np.shape[0] * y_np.shape[1], 1))
+        y_np = y_np.reshape(y_np.shape[0] * y_np.shape[1])
         return X_np, y_np
