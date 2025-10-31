@@ -1,1 +1,8 @@
-# TSNN
+# Time-series forecasting using transformers.
+
+In this repo we plan to demonstrate the effectiveness of transformer models for the problem of multi-dimensional time-series forecasting, in the setting where the signal to noise ratio is small. The setup is to predict a Y series of dimensions (time_steps, n_var) from an X of dimensions (time_steps, n_var, n_fea). The attention mechanism will be implemented both in the time-series and in the cross-sectional (n_fea and n_var) directions. We first test our model on synthetic noisy data, including simple examples of linear / nonlinear relationships and conditionings, in both the time series and cross-sectional dimensions. We compare the predictive power of the model to the simple benchmarks of linear and Lasso regresions, trees and boosting, and of simple neural networks architectures.
+
+## Contributors
+
+- [Cyril Garcia](https://github.com/cyrilgarcia009)
+- [Guillaume Remy](https://github.com/GuillaumeRemy92)
