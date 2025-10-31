@@ -51,11 +51,11 @@ def collate_pad_beginning(batch, pad_value=0.0, max_len=None):
         mask[i, -m:] = True
 
     y_batch = torch.stack(ys)
-    return X_padded, y_batch#, mask
+    return X_padded, y_batch  # , mask
 
 
 def np_to_torch(X, y=None, train_test_split=True, train_pct=0.7, batch_size=64, shuffle=True, n_rolling=1,
-                ts_split=True):
+                ts_split=True, narrow=False):
     """
     converts tensors to a torch dataset with option of having a train/test split
     :param X:
@@ -65,42 +65,33 @@ def np_to_torch(X, y=None, train_test_split=True, train_pct=0.7, batch_size=64, 
     :param batch_size:
     :return:
     """
-    if n_rolling == 1:
-        full_data = TorchDataset(X, y)
+    if narrow:
+        dataset = TorchDataset(X.reshape((X.shape[0] * X.shape[1], X.shape[2])),
+                               y.reshape((y.shape[0] * y.shape[1], 1))) if n_rolling == 1 else TorchDatasetRolling(
+            X.reshape((X.shape[0] * X.shape[1], X.shape[2])), y.reshape((y.shape[0] * y.shape[1], 1)), n=n_rolling)
     else:
-        full_data = TorchDatasetRolling(X, y, n=n_rolling)
-    if train_test_split:
-        train_size = int(train_pct * len(full_data))
-        test_size = len(full_data) - train_size
+        dataset = TorchDataset(X, y) if n_rolling == 1 else TorchDatasetRolling(X, y, n=n_rolling)
 
-        if ts_split:
-            total_size = len(full_data)
+    if not train_test_split:
+        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle,
+                          collate_fn=collate_pad_beginning if n_rolling > 1 else None)
 
-            train_indices = list(range(train_size))
-            test_indices = list(range(train_size, total_size))
+    train_size = int(train_pct * len(dataset))
+    test_size = len(dataset) - train_size
 
-            train_data = Subset(full_data, train_indices)
-            test_data = Subset(full_data, test_indices)
-        else:
-            train_data, test_data = random_split(full_data, [train_size, test_size],
-                                                 generator=torch.Generator().manual_seed(42))
-
-        if n_rolling == 1:
-            train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=shuffle)
-            test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=shuffle)
-        else:
-            train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=shuffle,
-                                      collate_fn=collate_pad_beginning
-                                      )
-            test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=shuffle,
-                                     collate_fn=collate_pad_beginning
-                                     )
-        return train_loader, test_loader
+    if ts_split:
+        train_indices = range(train_size)
+        test_indices = range(train_size, len(dataset))
+        train_data, test_data = Subset(dataset, train_indices), Subset(dataset, test_indices)
     else:
-        if n_rolling == 1:
-            return DataLoader(full_data, batch_size=batch_size, shuffle=shuffle)
-        else:
-            return DataLoader(full_data, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_pad_beginning)
+        train_data, test_data = random_split(dataset, [train_size, test_size],
+                                             generator=torch.Generator().manual_seed(42))
+
+    collate_fn = collate_pad_beginning if n_rolling > 1 else None
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn)
+    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn)
+
+    return train_loader, test_loader
 
 
 def torch_to_np(d):
@@ -112,8 +103,11 @@ def torch_to_np(d):
     indices = d.dataset.indices
     if hasattr(d.dataset.dataset, 'y'):
         X_np, y_np = d.dataset.dataset.X[indices], d.dataset.dataset.y[indices]
-        y_np = y_np.reshape(y_np.shape[0] * y_np.shape[1])
-        X_np = torch.reshape(X_np, (X_np.shape[0] * X_np.shape[1], X_np.shape[2]))
+        if len(X_np.shape) == 3:
+            y_np = y_np.reshape(y_np.shape[0] * y_np.shape[1])
+            X_np = torch.reshape(X_np, (X_np.shape[0] * X_np.shape[1], X_np.shape[2]))
+        else:
+            y_np = y_np.flatten()
         return X_np, y_np
 
     else:
