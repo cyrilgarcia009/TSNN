@@ -39,6 +39,8 @@ class Comparator:
         for k in range(len(self.models)):
             res.append(pd.Series(self.models[k].predict(dataloader)).rename(self.model_names[k]))
         res = pd.concat(res, axis=1).corr()
+
+        # setting upper triangle to NaN for better visualization
         upper_tri_idx = np.triu(np.ones(res.shape)).astype(bool)
         res = res.mask(upper_tri_idx).dropna(how='all', axis=0).dropna(how='all', axis=1)
         return res.style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1).format(precision=4)

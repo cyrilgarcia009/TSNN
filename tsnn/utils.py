@@ -46,7 +46,8 @@ def collate_pad_beginning(batch, pad_value=0.0, max_len=None):
     elif len(Xs[0].shape) == 2:
         N = Xs[0].shape[1]
         X_padded = torch.full((batch_size, max_m, N), pad_value)
-
+    else:
+        raise UserWarning('X tensor dont have the correct shape')
     mask = torch.zeros((batch_size, max_m), dtype=torch.bool)
 
     for i, x in enumerate(Xs):
