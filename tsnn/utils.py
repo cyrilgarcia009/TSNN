@@ -37,12 +37,16 @@ class TorchDatasetRolling(Dataset):
 
 def collate_pad_beginning(batch, pad_value=0.0, max_len=None):
     Xs, ys = zip(*batch)
-
-    max_m = max_len or max(x.shape[0] for x in Xs)
-    N, K = Xs[0].shape[1], Xs[0].shape[2]
-
     batch_size = len(Xs)
-    X_padded = torch.full((batch_size, max_m, N, K), pad_value)
+    max_m = max_len or max(x.shape[0] for x in Xs)
+
+    if len(Xs[0].shape) == 3:
+        N, K = Xs[0].shape[1], Xs[0].shape[2]
+        X_padded = torch.full((batch_size, max_m, N, K), pad_value)
+    elif len(Xs[0].shape) == 2:
+        N = Xs[0].shape[1]
+        X_padded = torch.full((batch_size, max_m, N), pad_value)
+
     mask = torch.zeros((batch_size, max_m), dtype=torch.bool)
 
     for i, x in enumerate(Xs):
