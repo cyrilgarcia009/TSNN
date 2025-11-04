@@ -54,22 +54,24 @@ class TorchWrapper:
 
     def predict(self, dataloader):
         if isinstance(dataloader, DataLoader):
-            non_shuffled = DataLoader(dataloader.dataset, shuffle=False)
+            non_shuffled = DataLoader(dataloader.dataset, batch_size=1024, num_workers=4, pin_memory=True,
+                                      shuffle=False, collate_fn=utils.collate_pad_beginning)
         else:
             raise UserWarning('dataloader should be a torch Dataset')
 
-        res = []
+        preds = []
         self.model.eval()
-        with torch.no_grad():
-            for z in non_shuffled:
-                if len(z) == 2:
-                    X = z[0]
-                else:
-                    X = z
-                X = X.to(self.device)
-                pred = self.model(X).cpu().numpy()
-                res.append(pred.flatten())
-        return np.concatenate(res)
+
+        with torch.inference_mode():
+            for batch in non_shuffled:
+                X = batch[0] if isinstance(batch, (list, tuple)) else batch
+                X = X.to(self.device, non_blocking=True)
+
+                pred = self.model(X)
+                preds.append(pred.detach().cpu())
+
+        preds = torch.cat(preds, dim=0).numpy()
+        return preds.flatten()
 
     def score(self, dataloader):
         X, y = utils.torch_to_np(dataloader)
