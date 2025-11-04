@@ -38,10 +38,7 @@ class Generator:
         :param pct_zero_corr: percentage of features with 0 correlation to y
         :return: torch datasets
         """
-        # todo: add some conditioning predictive power (only direct correlation of features for now)
         # todo: add non-linear dependencies
-        # todo: add lead-lag alpha between time series
-        # random y
 
         y = np.random.multivariate_normal(mean=np.zeros(self.n_ts),
                                           cov=self.generate_covar(self.n_ts),
@@ -58,9 +55,9 @@ class Generator:
         # zero out some of the features correl
         corr_with_y[int(self.n_f * pct_zero_corr):] = 0
 
-
         self.corr_with_y = torch.tensor(corr_with_y, dtype=torch.float32)
 
+        # X is an array containing the features, each feature is a matrix of dimension (T, n_ts)
         X = np.array([np.random.multivariate_normal(mean=np.zeros(self.n_ts),
                                                     cov=self.generate_covar(self.n_ts),
                                                     size=self.T) for k in range(self.n_f)])
@@ -77,8 +74,7 @@ class Generator:
         start_seasonal_ft = end_shift_ft
         end_seasonal_ft = int(split_seasonal * n_corr_ft) + start_seasonal_ft
 
-
-        start_random_ft = int(self.n_f * (1-pct_zero_corr))
+        start_random_ft = int(self.n_f * (1 - pct_zero_corr))
 
         # linear relationships
         for k in range(start_random_ft):
@@ -93,7 +89,7 @@ class Generator:
             self.y_pred_optimal += optimal_pred
             self.y_conditional += optimal_pred
 
-        # Shift relationships
+        # Shift relationships - shift could be variable by feature
         for k in range(start_shift_ft, end_shift_ft):
             n_shift = 1
             X[k] = np.concatenate((X[k][n_shift:], X[k][:n_shift] * 0))
@@ -101,20 +97,24 @@ class Generator:
             self.y_pred_optimal += optimal_pred
             self.y_shift += optimal_pred
 
-        # Seasonal relationships
+        # Seasonal relationships - could also make the seasonal pattern random by feature
         for k in range(start_seasonal_ft, end_seasonal_ft):
             period = 10
             optimal_pred = X[k] * 0
-            for i in range(len(X)):
+            for i in range(X[k].shape[0]):
                 X[k][i] = X[k][i] - corr_with_y[k] * y[i] * (i % period != 0)
                 optimal_pred[i] = corr_with_y[k] * X[k][i] * (i % period == 0)
             self.y_pred_optimal += optimal_pred
             self.y_seasonal += optimal_pred
+
+        # Adding the usual linear relationships to the optimal pred
+        for k in range(end_seasonal_ft, start_random_ft):
+            self.y_pred_optimal += corr_with_y[k] * X[k]
+            self.y_linear += corr_with_y[k] * X[k]
 
         X = torch.from_numpy(X)
         X = torch.transpose(X, 0, 1)
         X = torch.transpose(X, 1, 2)
         X = X.to(dtype=torch.float32)
 
-        self.y_pred_optimal = X @ self.corr_with_y
         return X, torch.from_numpy(y).to(dtype=torch.float32)
