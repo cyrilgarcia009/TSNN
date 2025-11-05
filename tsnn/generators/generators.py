@@ -32,7 +32,7 @@ class Generator:
         return torch.from_numpy(norm @ cov_raw @ norm)
 
     def generate_dataset(self, pct_zero_corr: float = 0.5, split_conditional: float = 0.3, split_shift: float = 0.0,
-                         split_seasonal: float = 0.0) -> tuple:
+                         split_seasonal: float = 0.0, low_corr: float = 0.005, high_corr: float = 0.03) -> tuple:
         """
 
         :param pct_zero_corr: percentage of features with 0 correlation to y
@@ -50,7 +50,7 @@ class Generator:
         self.y_seasonal = y * 0
 
         # pick features correl - linear relationship
-        corr_with_y = np.random.uniform(low=0.005, high=0.03, size=self.n_f)
+        corr_with_y = np.random.uniform(low=low_corr, high=high_corr, size=self.n_f)
         corr_with_y *= np.random.choice([-1, 1], self.n_f)
         # zero out some of the features correl
         corr_with_y[int(self.n_f * pct_zero_corr):] = 0
@@ -92,8 +92,12 @@ class Generator:
         # Shift relationships - shift could be variable by feature
         for k in range(start_shift_ft, end_shift_ft):
             n_shift = 1
-            X[k] = np.concatenate((X[k][n_shift:], X[k][:n_shift] * 0))
-            optimal_pred = np.concatenate((X[k][:n_shift] * 0, X[k][n_shift:])) * corr_with_y[k]
+            y_shifted = np.concatenate((y[n_shift:], y[:n_shift] * 0))
+
+            X[k] = X[k] - corr_with_y[k] * y
+            X[k] = X[k] + corr_with_y[k] * y_shifted
+            optimal_pred = np.concatenate((X[k][:n_shift] * 0, X[k][:-n_shift])) * corr_with_y[k]
+
             self.y_pred_optimal += optimal_pred
             self.y_shift += optimal_pred
 
