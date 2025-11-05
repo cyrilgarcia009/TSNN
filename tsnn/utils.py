@@ -59,7 +59,7 @@ def collate_pad_beginning(batch, pad_value=0.0, max_len=None):
     return X_padded, y_batch  # , mask
 
 
-def np_to_torch(X, y=None, train_test_split=True, train_pct=0.7, batch_size=64, shuffle=True, n_rolling=1,
+def np_to_torch(X, y=None, train_test_split=True, train_pct=0.7, batch_size=256, shuffle=True, n_rolling=1,
                 ts_split=True, narrow=False):
     """
     converts tensors to a torch dataset with option of having a train/test split

@@ -1,6 +1,9 @@
 import torch
 from torch import nn
 import numpy as np
+import pandas as pd
+from tqdm import tqdm
+import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from .. import utils
 
@@ -47,10 +50,14 @@ class TorchWrapper:
         self.test_loss.append(test_loss)
 
     def fit(self, train, test=None, epochs=40):
-        for t in range(epochs):
+        for t in tqdm(range(epochs)):
             self.train_loop(train)
             if test is not None:
                 self.test_loop(test)
+        pd.concat([pd.Series(self.train_loss).rename('train_loss'),
+                   pd.Series(self.test_loss).rename('test_loss')],
+                  axis=1).plot()
+        plt.title('Training and Validation Loss over Epochs')
 
     def predict(self, dataloader):
         if isinstance(dataloader, DataLoader):

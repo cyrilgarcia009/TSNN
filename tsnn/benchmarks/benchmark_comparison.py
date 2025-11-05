@@ -37,7 +37,11 @@ class Comparator:
             res.append(pd.Series(generator.y_shift[loader_idx].flatten()).rename('y_shift'))
 
         for k in range(len(self.models)):
-            res.append(pd.Series(self.models[k].predict(dataloader)).rename(self.model_names[k]))
+            prediction = pd.Series(self.models[k].predict(dataloader)).rename(self.model_names[k])
+            if len(prediction) != len(res[0]):
+                raise UserWarning(
+                    f'data dimension mismatch for model {self.model_names[k]}, the dataloader object must match the prediction model')
+            res.append(prediction)
         res = pd.concat(res, axis=1).corr()
 
         # setting upper triangle to NaN for better visualization
