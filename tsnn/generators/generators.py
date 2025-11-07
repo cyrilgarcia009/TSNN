@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from .. import utils
 
 
 class Generator:
@@ -13,14 +14,20 @@ class Generator:
         self.n_ts = n_ts
         self.n_f = n_f
         self.T = T
+        self.X = None
+        self.y = None
         self.corr_with_y = None
+        self.ys = {'true': torch.empty(0), 'optimal': torch.empty(0), 'linear': torch.empty(0),
+                   'conditional': torch.empty(0), 'shift': torch.empty(0), 'seasonal': torch.empty(0)}
         self.y_pred_optimal = None
         self.y_linear = None
         self.y_conditional = None
         self.y_shift = None
         self.y_seasonal = None
+        self.dataloader = None
+        self.is_transposed = False
 
-    def generate_covar(self, n: int) -> torch.tensor:
+    def generate_covar(self, n: int) -> torch.Tensor:
         """
 
         :param n: covar dim
@@ -32,7 +39,7 @@ class Generator:
         return torch.from_numpy(norm @ cov_raw @ norm)
 
     def generate_dataset(self, pct_zero_corr: float = 0.5, split_conditional: float = 0.3, split_shift: float = 0.0,
-                         split_seasonal: float = 0.0, low_corr: float = 0.005, high_corr: float = 0.03) -> tuple:
+                         split_seasonal: float = 0.0, low_corr: float = 0.005, high_corr: float = 0.03) -> None:
         """
 
         :param pct_zero_corr: percentage of features with 0 correlation to y
@@ -119,6 +126,34 @@ class Generator:
         X = torch.from_numpy(X)
         X = torch.transpose(X, 0, 1)
         X = torch.transpose(X, 1, 2)
-        X = X.to(dtype=torch.float32)
 
-        return X, torch.from_numpy(y).to(dtype=torch.float32)
+        self.X = X.to(dtype=torch.float32)
+        self.y = torch.from_numpy(y).to(dtype=torch.float32)
+
+        self.ys['optimal'] = torch.from_numpy(self.y_pred_optimal).to(dtype=torch.float32)
+        self.ys['linear'] = torch.from_numpy(self.y_linear).to(dtype=torch.float32)
+        self.ys['shift'] = torch.from_numpy(self.y_shift).to(dtype=torch.float32)
+        self.ys['seasonal'] = torch.from_numpy(self.y_seasonal).to(dtype=torch.float32)
+        self.ys['conditional'] = torch.from_numpy(self.y_conditional).to(dtype=torch.float32)
+        self.ys['true'] = torch.from_numpy(y).to(dtype=torch.float32)
+
+    def get_dataloader(self, n_rolling=1, narrow=False, train_test_split=True, shuffle=True):
+        if self.X is None:
+            raise UserWarning('Dataset not generated yet, please run generate_dataset() first')
+
+        if (narrow and n_rolling > 1 and not self.is_transposed):
+            for name in self.ys:
+                self.ys[name] = self.ys[name].transpose(0, 1)
+            self.is_transposed = True
+        elif self.is_transposed and (not narrow or n_rolling == 1):
+            for name in self.ys:
+                self.ys[name] = self.ys[name].transpose(0, 1)
+            self.is_transposed = False
+
+
+        if train_test_split:
+            self.train, self.test = utils.np_to_torch(self.X, self.y, n_rolling=n_rolling, narrow=narrow,
+                                                      train_test_split=train_test_split, shuffle=shuffle)
+        else:
+            self.train = utils.np_to_torch(self.X, self.y, n_rolling=n_rolling, narrow=narrow,
+                                           train_test_split=train_test_split, shuffle=shuffle)

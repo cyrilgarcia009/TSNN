@@ -70,10 +70,13 @@ def np_to_torch(X, y=None, train_test_split=True, train_pct=0.7, batch_size=256,
     :param batch_size:
     :return:
     """
-    if narrow:
+    if narrow and n_rolling == 1:
         dataset = TorchDataset(X.reshape((X.shape[0] * X.shape[1], X.shape[2])),
-                               y.reshape((y.shape[0] * y.shape[1], 1))) if n_rolling == 1 else TorchDatasetRolling(
-            X.reshape((X.shape[0] * X.shape[1], X.shape[2])), y.reshape((y.shape[0] * y.shape[1], 1)), n=n_rolling)
+                               y.reshape((y.shape[0] * y.shape[1], 1)))
+    elif narrow and n_rolling > 1:
+        dataset = TorchDatasetRolling(X.transpose(0, 1).reshape((X.shape[0] * X.shape[1], X.shape[2])),
+                                      y.transpose(0, 1).reshape((y.shape[0] * y.shape[1], 1)),
+                                      n=n_rolling)
     else:
         dataset = TorchDataset(X, y) if n_rolling == 1 else TorchDatasetRolling(X, y, n=n_rolling)
 

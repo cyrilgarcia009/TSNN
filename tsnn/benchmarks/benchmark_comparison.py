@@ -13,28 +13,25 @@ class Comparator:
         else:
             self.model_names = model_names
 
-    def correl(self, dataloader, generator):
+    def correl(self, generator, mode='train'):
         """
         Correl matrix of all models, true y and optimal prediction
         :param X: data to predict
         :return:
         """
-        X, y_true = utils.torch_to_np(dataloader)
-        res = [pd.Series(y_true).rename('y_true')]
-        # if y_optimal is not None:
-        loader_idx = dataloader.dataset.indices
-        if len(loader_idx) > generator.y_pred_optimal.shape[0]:
-            res.append(pd.Series(generator.y_pred_optimal.flatten()[loader_idx]).rename('y_optimal'))
-            res.append(pd.Series(generator.y_linear.flatten()[loader_idx]).rename('y_linear'))
-            res.append(pd.Series(generator.y_seasonal.flatten()[loader_idx]).rename('y_seasonal'))
-            res.append(pd.Series(generator.y_conditional.flatten()[loader_idx]).rename('y_conditional'))
-            res.append(pd.Series(generator.y_shift.flatten()[loader_idx]).rename('y_shift'))
+        if mode == 'train':
+            dataloader = generator.train
         else:
-            res.append(pd.Series(generator.y_pred_optimal[loader_idx].flatten()).rename('y_optimal'))
-            res.append(pd.Series(generator.y_linear[loader_idx].flatten()).rename('y_linear'))
-            res.append(pd.Series(generator.y_seasonal[loader_idx].flatten()).rename('y_seasonal'))
-            res.append(pd.Series(generator.y_conditional[loader_idx].flatten()).rename('y_conditional'))
-            res.append(pd.Series(generator.y_shift[loader_idx].flatten()).rename('y_shift'))
+            dataloader = generator.test
+
+        loader_idx = dataloader.dataset.indices
+        res = []
+        if len(loader_idx) > generator.ys['true'].shape[0]:
+            for name in generator.ys:
+                res.append(pd.Series(generator.ys[name].flatten()[loader_idx]).rename(name))
+        else:
+            for name in generator.ys:
+                res.append(pd.Series(generator.ys[name][loader_idx].flatten()).rename(name))
 
         for k in range(len(self.models)):
             prediction = pd.Series(self.models[k].predict(dataloader)).rename(self.model_names[k])
