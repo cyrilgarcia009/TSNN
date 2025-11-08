@@ -13,7 +13,7 @@ class Comparator:
         else:
             self.model_names = model_names
 
-    def correl(self, generator, mode='train'):
+    def correl(self, generator, mode='train', return_values=False):
         """
         Correl matrix of all models, true y and optimal prediction
         :param X: data to predict
@@ -44,4 +44,7 @@ class Comparator:
         # setting upper triangle to NaN for better visualization
         upper_tri_idx = np.triu(np.ones(res.shape)).astype(bool)
         res = res.mask(upper_tri_idx).dropna(how='all', axis=0).dropna(how='all', axis=1)
-        return res.style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1).format(precision=4)
+        if return_values:
+            return res
+        else:    
+            return res.style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1).format(precision=4)
