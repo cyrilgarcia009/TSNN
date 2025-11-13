@@ -18,12 +18,14 @@ class Generator:
         self.y = None
         self.corr_with_y = None
         self.ys = {'true': torch.empty(0), 'optimal': torch.empty(0), 'linear': torch.empty(0),
-                   'conditional': torch.empty(0), 'shift': torch.empty(0), 'seasonal': torch.empty(0)}
+                   'conditional': torch.empty(0), 'shift': torch.empty(0), 'seasonal': torch.empty(0),
+                   'cs': torch.empty(0)}
         self.y_pred_optimal = None
         self.y_linear = None
         self.y_conditional = None
         self.y_shift = None
         self.y_seasonal = None
+        self.y_cs = None
         self.dataloader = None
         self.is_transposed = False
 
@@ -39,14 +41,15 @@ class Generator:
         return torch.from_numpy(norm @ cov_raw @ norm)
 
     def generate_dataset(self, pct_zero_corr: float = 0.5, split_conditional: float = 0.3, split_shift: float = 0.0,
-                         split_seasonal: float = 0.0, low_corr: float = 0.005, high_corr: float = 0.03) -> None:
+                         split_seasonal: float = 0.0, split_cs: float = 0.0, split_cs_shift: float = 0.0,
+                         low_corr: float = 0.005, high_corr: float = 0.03) -> None:
         """
 
         :param pct_zero_corr: percentage of features with 0 correlation to y
         :return: torch datasets
         """
         # todo: add non-linear dependencies
-
+        assert split_conditional + split_shift + split_seasonal + split_cs + split_cs_shift <= 1
         y = np.random.multivariate_normal(mean=np.zeros(self.n_ts),
                                           cov=self.generate_covar(self.n_ts),
                                           size=self.T)
@@ -55,6 +58,7 @@ class Generator:
         self.y_conditional = y * 0
         self.y_shift = y * 0
         self.y_seasonal = y * 0
+        self.y_cs = y * 0
 
         # pick features correl - linear relationship
         corr_with_y = np.random.uniform(low=low_corr, high=high_corr, size=self.n_f)
@@ -73,7 +77,7 @@ class Generator:
         n_corr_ft = int(self.n_f * (1 - pct_zero_corr))
 
         start_cond_ft = 0
-        end_cond_ft = int(n_corr_ft * split_conditional)
+        end_cond_ft = int(split_conditional * n_corr_ft)
 
         start_shift_ft = end_cond_ft
         end_shift_ft = int(split_shift * n_corr_ft) + start_shift_ft
@@ -81,13 +85,22 @@ class Generator:
         start_seasonal_ft = end_shift_ft
         end_seasonal_ft = int(split_seasonal * n_corr_ft) + start_seasonal_ft
 
+        start_cs_ft = end_seasonal_ft
+        end_cs_ft = int(split_cs * n_corr_ft) + start_cs_ft
+
+
         start_random_ft = int(self.n_f * (1 - pct_zero_corr))
 
         # linear relationships
-        for k in range(start_random_ft):
+        for k in range(start_cs_ft):
             X[k] = X[k] + corr_with_y[k] * y
-            # self.y_pred_optimal += corr_with_y[k] * X[k]
-            # self.y_linear += corr_with_y[k] * X[k]
+
+        # CS relationships
+        for k in range(start_cs_ft, start_random_ft):
+            # cs_shift = np.concatenate((X[k][:, 1:], X[k][:, :1]), axis=1)
+            cs_shift = np.concatenate((y[:, 1:], y[:, :1]), axis=1)
+            # stock n feature k predicts stock n+1
+            X[k] = X[k] + corr_with_y[k] * cs_shift
 
         # Conditioning relationships (need to condition feature k by sign of feature)
         for k in range(start_cond_ft, end_cond_ft):
@@ -118,8 +131,14 @@ class Generator:
             self.y_pred_optimal += optimal_pred
             self.y_seasonal += optimal_pred
 
+        # CS relationships
+        for k in range(start_cs_ft, end_cs_ft):
+            cs_shift = np.concatenate((X[k][:, [-1]], X[k][:, 0:-1]), axis=1)
+            self.y_pred_optimal += corr_with_y[k] * cs_shift
+            self.y_cs += corr_with_y[k] * cs_shift
+
         # Adding the usual linear relationships to the optimal pred
-        for k in range(end_seasonal_ft, start_random_ft):
+        for k in range(end_cs_ft, start_random_ft):
             self.y_pred_optimal += corr_with_y[k] * X[k]
             self.y_linear += corr_with_y[k] * X[k]
 
@@ -135,6 +154,7 @@ class Generator:
         self.ys['shift'] = torch.from_numpy(self.y_shift).to(dtype=torch.float32)
         self.ys['seasonal'] = torch.from_numpy(self.y_seasonal).to(dtype=torch.float32)
         self.ys['conditional'] = torch.from_numpy(self.y_conditional).to(dtype=torch.float32)
+        self.ys['cs'] = torch.from_numpy(self.y_cs).to(dtype=torch.float32)
         self.ys['true'] = torch.from_numpy(y).to(dtype=torch.float32)
 
     def get_dataloader(self, n_rolling=1, narrow=False, train_test_split=True, shuffle=True):
