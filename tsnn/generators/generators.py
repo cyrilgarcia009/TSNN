@@ -67,7 +67,7 @@ class Generator:
         corr_with_y = np.random.uniform(low=low_corr, high=high_corr, size=self.n_f)
         corr_with_y *= np.random.choice([-1, 1], self.n_f)
         # zero out some of the features correl
-        corr_with_y[int(self.n_f * pct_zero_corr):] = 0
+        corr_with_y[int(self.n_f * (1-pct_zero_corr)):] = 0
 
         self.corr_with_y = torch.tensor(corr_with_y, dtype=torch.float32)
 
