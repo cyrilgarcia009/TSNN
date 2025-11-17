@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from .. import utils
+import pandas as pd
 
 
 class Generator:
@@ -37,7 +38,7 @@ class Generator:
         :return:
         """
         A = np.random.normal(size=n ** 2).reshape(n, n)
-        cov_raw = A @ A.T + np.eye(n) * 1e-6
+        cov_raw = A @ A.T * 0 + np.eye(n) * 1e-2
         norm = np.diag(1 / np.sqrt(np.diag(cov_raw)))
         return torch.from_numpy(norm @ cov_raw @ norm)
 
@@ -96,17 +97,19 @@ class Generator:
         start_random_ft = int(self.n_f * (1 - pct_zero_corr))
 
         # linear relationships
-        for k in range(start_cs_ft):
-            X[k] = X[k] + corr_with_y[k] * y
+        for k in range(start_random_ft):
+            X[k] += corr_with_y[k] * y
 
         # CS relationships
-        for k in range(start_cs_ft, start_random_ft):
+        for k in range(start_cs_ft, end_cs_ft):
+            X[k] = X[k] - corr_with_y[k] * y
             y_cs = np.concatenate((y[:, 1:], y[:, :1]), axis=1)
             # stock n feature k predicts stock n+1
             X[k] = X[k] + corr_with_y[k] * y_cs
 
         # Conditioning relationships (need to condition feature k by sign of feature)
         for k in range(start_cond_ft, end_cond_ft):
+            X[k] = X[k] - corr_with_y[k] * y
             X[k] = X[k] * np.sign(X[start_random_ft + k])
             optimal_pred = corr_with_y[k] * X[k] * np.sign(X[start_random_ft + k])
             self.y_pred_optimal += optimal_pred
@@ -136,12 +139,14 @@ class Generator:
 
         # CS relationships
         for k in range(start_cs_ft, end_cs_ft):
+            X[k] = X[k] - corr_with_y[k] * y
             cs_shift = np.concatenate((X[k][:, [-1]], X[k][:, 0:-1]), axis=1)
             self.y_pred_optimal += corr_with_y[k] * cs_shift
             self.y_cs += corr_with_y[k] * cs_shift
 
         # CS + Shift relationships - shift could be variable
         for k in range(start_cs_shift_ft, end_cs_shift_ft):
+            X[k] = X[k] - corr_with_y[k] * y
             n_shift = 1
 
             y_shifted = np.concatenate((y[n_shift:], y[:n_shift] * 0))
