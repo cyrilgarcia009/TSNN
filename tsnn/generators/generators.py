@@ -109,7 +109,6 @@ class Generator:
 
         # Conditioning relationships (need to condition feature k by sign of feature)
         for k in range(start_cond_ft, end_cond_ft):
-            X[k] = X[k] - corr_with_y[k] * y
             X[k] = X[k] * np.sign(X[start_random_ft + k])
             optimal_pred = corr_with_y[k] * X[k] * np.sign(X[start_random_ft + k])
             self.y_pred_optimal += optimal_pred
