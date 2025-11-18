@@ -16,38 +16,50 @@ class TorchWrapper:
         self.optimizer = optimizer
         self.train_loss = []
         self.test_loss = []
+        self.train_corr = []
+        self.test_corr = []
 
     def train_loop(self, dataloader):
         self.model.train()
         num_batches = len(dataloader)
         train_loss = 0
+        train_corr = 0
         for batch, (X, y) in enumerate(dataloader):
             X, y = X.to(self.device), y.to(self.device)
 
             pred = self.model(X)
             loss = self.loss_fn(pred, y)
             train_loss += loss.item()
+            train_corr += (np.corrcoef(pred.detach().flatten().to('cpu'),
+                                       y.detach().flatten().to('cpu'))[0][1])
 
             loss.backward()
             self.optimizer.step()
             self.optimizer.zero_grad()
 
         train_loss /= num_batches
+        train_corr /= num_batches
         self.train_loss.append(train_loss)
+        self.train_corr.append(train_corr)
 
     def test_loop(self, dataloader):
         self.model.eval()
         num_batches = len(dataloader)
         test_loss = 0
+        test_corr = 0
 
         with torch.no_grad():
             for X, y in dataloader:
                 X, y = X.to(self.device), y.to(self.device)
                 pred = self.model(X)
                 test_loss += self.loss_fn(pred, y).item()
+                test_corr += (np.corrcoef(pred.flatten().to('cpu'), y.flatten().to('cpu'))[0][1])
+
 
         test_loss /= num_batches
+        test_corr /= num_batches
         self.test_loss.append(test_loss)
+        self.test_corr.append(test_corr)
 
     def fit(self, train, test=None, epochs=40):
         for t in tqdm(range(epochs)):
@@ -57,7 +69,13 @@ class TorchWrapper:
         pd.concat([pd.Series(self.train_loss).rename('train_loss'),
                    pd.Series(self.test_loss).rename('test_loss')],
                   axis=1).plot()
-        plt.title('Training and Validation Loss over Epochs')
+        plt.title('MSE over Epochs')
+        plt.show()
+        pd.concat([pd.Series(self.train_corr).rename('train_loss'),
+                   pd.Series(self.test_corr).rename('test_loss')],
+                  axis=1).plot()
+        plt.title('Correlation over Epochs')
+        plt.show()
 
     def predict(self, dataloader):
         if isinstance(dataloader, DataLoader):
