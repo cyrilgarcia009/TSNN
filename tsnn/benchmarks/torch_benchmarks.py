@@ -61,21 +61,22 @@ class TorchWrapper:
         self.test_loss.append(test_loss)
         self.test_corr.append(test_corr)
 
-    def fit(self, train, test=None, epochs=40):
+    def fit(self, train, test=None, epochs=40, plot=True):
         for t in tqdm(range(epochs)):
             self.train_loop(train)
             if test is not None:
                 self.test_loop(test)
-        pd.concat([pd.Series(self.train_loss).rename('train_loss'),
-                   pd.Series(self.test_loss).rename('test_loss')],
-                  axis=1).plot()
-        plt.title('MSE over Epochs')
-        plt.show()
-        pd.concat([pd.Series(self.train_corr).rename('train_loss'),
-                   pd.Series(self.test_corr).rename('test_loss')],
-                  axis=1).plot()
-        plt.title('Correlation over Epochs')
-        plt.show()
+        if plot:
+            pd.concat([pd.Series(self.train_loss).rename('train_loss'),
+                       pd.Series(self.test_loss).rename('test_loss')],
+                      axis=1).plot()
+            plt.title('MSE over Epochs')
+            plt.show()
+            pd.concat([pd.Series(self.train_corr).rename('train_loss'),
+                       pd.Series(self.test_corr).rename('test_loss')],
+                      axis=1).plot()
+            plt.title('Correlation over Epochs')
+            plt.show()
 
     def predict(self, dataloader):
         if isinstance(dataloader, DataLoader):
