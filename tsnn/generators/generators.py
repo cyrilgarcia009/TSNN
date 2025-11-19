@@ -183,7 +183,7 @@ class Generator:
         self.ys['cs_shift'] = torch.from_numpy(self.y_cs_shift).to(dtype=torch.float32)
         self.ys['true'] = torch.from_numpy(y).to(dtype=torch.float32)
 
-    def get_dataloader(self, n_rolling=1, narrow=False, train_test_split=True, shuffle=True):
+    def get_dataloader(self, n_rolling=1, narrow=False, train_test_split=True, shuffle=True, batch_size=256):
         if self.X is None:
             raise UserWarning('Dataset not generated yet, please run generate_dataset() first')
 
@@ -199,7 +199,9 @@ class Generator:
 
         if train_test_split:
             self.train, self.test = utils.np_to_torch(self.X, self.y, n_rolling=n_rolling, narrow=narrow,
-                                                      train_test_split=train_test_split, shuffle=shuffle)
+                                                      train_test_split=train_test_split, shuffle=shuffle,
+                                                      batch_size=batch_size)
         else:
             self.train = utils.np_to_torch(self.X, self.y, n_rolling=n_rolling, narrow=narrow,
-                                           train_test_split=train_test_split, shuffle=shuffle)
+                                           train_test_split=train_test_split, shuffle=shuffle,
+                                           batch_size=batch_size)
