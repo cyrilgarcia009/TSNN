@@ -47,4 +47,4 @@ class Comparator:
         if return_values:
             return res
         else:    
-            return res.style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1).format(precision=4)
+            return res.style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1).format(precision=3)
