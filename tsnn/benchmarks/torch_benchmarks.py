@@ -28,6 +28,7 @@ class TorchWrapper:
             X, y = X.to(self.device), y.to(self.device)
 
             pred = self.model(X)
+            # print(pred.shape, y.shape)
             loss = self.loss_fn(pred, y)
             train_loss += loss.item()
             train_corr += (np.corrcoef(pred.detach().flatten().to('cpu'),

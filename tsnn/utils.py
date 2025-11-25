@@ -19,10 +19,11 @@ class TorchDataset(Dataset):
 
 
 class TorchDatasetRolling(Dataset):
-    def __init__(self, X, y=None, n=10):
+    def __init__(self, X, y=None, n=10, roll_y=False):
         self.X = X
         self.y = y
         self.n = n
+        self.roll_y = roll_y
 
     def __len__(self):
         return len(self.X)
@@ -30,7 +31,10 @@ class TorchDatasetRolling(Dataset):
     def __getitem__(self, idx):
         start = max(0, idx - self.n + 1)
         if self.y is not None:
-            return self.X[start:idx + 1], self.y[idx]
+            if self.roll_y:
+                return self.X[start:idx + 1], self.y[start:idx + 1]
+            else:
+                return self.X[start:idx + 1], self.y[idx]
         else:
             return self.X[start:idx + 1]
 
@@ -55,12 +59,23 @@ def collate_pad_beginning(batch, pad_value=0.0, max_len=None):
         X_padded[i, -m:] = x
         mask[i, -m:] = True
 
-    y_batch = torch.stack(ys)
-    return X_padded, y_batch  # , mask
+    max_m = max_len or max(x.shape[0] for x in ys)
+    if len(ys[0].shape) == 2:
+        N = ys[0].shape[1]
+        y_padded = torch.full((batch_size, max_m, N), pad_value)
+        mask = torch.zeros((batch_size, max_m), dtype=torch.bool)
+        for i, x in enumerate(ys):
+            m = x.shape[0]
+            y_padded[i, -m:] = x
+            mask[i, -m:] = True
+    else:
+        y_padded = torch.stack(ys)
+
+    return X_padded, y_padded  # , mask
 
 
 def np_to_torch(X, y=None, train_test_split=True, train_pct=0.7, batch_size=256, shuffle=True, n_rolling=1,
-                ts_split=True, narrow=False):
+                ts_split=True, narrow=False, roll_y=False):
     """
     converts tensors to a torch dataset with option of having a train/test split
     :param X:
@@ -73,12 +88,12 @@ def np_to_torch(X, y=None, train_test_split=True, train_pct=0.7, batch_size=256,
     if narrow and n_rolling == 1:
         dataset = TorchDataset(X.reshape((X.shape[0] * X.shape[1], X.shape[2])),
                                y.reshape((y.shape[0] * y.shape[1], 1)))
-    elif narrow and n_rolling > 1:
+    elif narrow and (n_rolling > 1):
         dataset = TorchDatasetRolling(X.transpose(0, 1).reshape((X.shape[0] * X.shape[1], X.shape[2])),
                                       y.transpose(0, 1).reshape((y.shape[0] * y.shape[1], 1)),
-                                      n=n_rolling)
+                                      n=n_rolling, roll_y=roll_y)
     else:
-        dataset = TorchDataset(X, y) if n_rolling == 1 else TorchDatasetRolling(X, y, n=n_rolling)
+        dataset = TorchDataset(X, y) if n_rolling == 1 else TorchDatasetRolling(X, y, n=n_rolling, roll_y=roll_y)
 
     if not train_test_split:
         return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle,
