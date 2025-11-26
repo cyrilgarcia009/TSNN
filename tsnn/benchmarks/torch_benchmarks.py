@@ -96,9 +96,23 @@ class TorchWrapper:
 
                 pred = self.model(X)
                 preds.append(pred.detach().cpu())
-
         preds = torch.cat(preds, dim=0).numpy()
-        return preds.flatten()
+        #return preds.flatten()
+
+            # === NEW: Handle different output dimensions ===
+        if preds.ndim == 2:
+            return preds.flatten()
+
+        elif preds.ndim == 3:
+            preds_last_timestep = preds[:, -1, :]
+            return preds_last_timestep.flatten()
+
+        else:
+            raise ValueError(
+                f"Model output has unsupported number of dimensions: {preds.ndim}. "
+                f"Got shape: {preds.shape}"
+            )
+            
 
     def score(self, dataloader):
         X, y = utils.torch_to_np(dataloader)
