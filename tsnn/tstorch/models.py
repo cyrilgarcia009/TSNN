@@ -1,4 +1,3 @@
-
 import torch
 from torch import nn
 from tsnn.tstorch import transformers
@@ -36,7 +35,7 @@ class GlobalMLP(nn.Module):
         
         layers = []
         dim = input_dim
-        for i in range(num_layers):
+        for _ in range(num_layers):
             layers.append(nn.Linear(dim, hidden_dim))
             layers.append(nn.GELU())
             layers.append(nn.Dropout(dropout))
@@ -58,69 +57,61 @@ class GlobalMLP(nn.Module):
 
 
 
-# Model below is still work in progress...
-
 class BiDimensionalMLP(nn.Module):
     def __init__(
         self,
         n_ts,          # N
         n_f,           # F
         n_rolling,     # T
-        d_model=256,   # hidden size after per-series processing
-        hidden_global=512,
-        num_layers_local=3,
-        num_layers_global=3,
+        first_direction="T", # Must be "T" or "C" for time-series or cross-sectional
+        hidden_dim_mlp1=256, 
+        hidden_dim_mlp2=512,
+        num_layers_mlp1=3,
+        num_layers_mlp2=3,
         dropout=0.1,
-        first_direction="T" # Must be "T" or "C" for time-series or cross-sectional
+        
     ):
         super().__init__()
         
         self.n_ts = n_ts
-        self.d_model = d_model
+        self.hidden_dim_mlp1 = hidden_dim_mlp1
         self.first_direction = first_direction
 
         if self.first_direction == "T":
             self.input_dim1 = n_rolling * n_f
-            self.input_dim2 = n_ts * d_model
+            self.input_dim2 = n_ts * hidden_dim_mlp1
         else:
             self.input_dim1 = n_ts * n_f
-            self.input_dim2 = n_rolling * d_model
+            self.input_dim2 = n_rolling * hidden_dim_mlp1
 
         
-        # --------------------------------------------------------------
-        # 1. Local MLP: applied independently to each series
-        #    Input per series: T × F  →  collapses to d_model
-        # --------------------------------------------------------------
         local_layers = []
         dim = n_rolling * n_f
-        for i in range(num_layers_local):
+        for i in range(num_layers_mlp1):
             local_layers.extend([
-                nn.Linear(dim, d_model),
+                nn.Linear(dim, hidden_dim_mlp1),
                 nn.GELU(),
                 nn.Dropout(dropout),
-                nn.LayerNorm(d_model)
+                nn.LayerNorm(hidden_dim_mlp1)
             ])
-            dim = d_model
+            dim = hidden_dim_mlp1
         # Final local projection
-        local_layers.append(nn.Linear(dim, d_model))
-        self.local_mlp = nn.Sequential(*local_layers)
+        local_layers.append(nn.Linear(dim, hidden_dim_mlp1))
+        self.mlp1 = nn.Sequential(*local_layers)
         
-        # --------------------------------------------------------------
-        # 2. Global MLP: mixes information across the N series
-        #    Input: N × d_model  →  N
-        # --------------------------------------------------------------
+
         global_layers = []
-        dim = n_ts * d_model
-        for i in range(num_layers_global):
+        dim = n_ts * hidden_dim_mlp1
+        for i in range(num_layers_mlp2):
             global_layers.extend([
-                nn.Linear(dim, hidden_global),
+                nn.Linear(dim, hidden_dim_mlp2),
                 nn.GELU(),
                 nn.Dropout(dropout),
-                nn.LayerNorm(hidden_global)
+                nn.LayerNorm(hidden_dim_mlp2)
             ])
-            dim = hidden_global
-        global_layers.append(nn.Linear(hidden_global, n_ts))
-        self.global_mlp = nn.Sequential(*global_layers)
+            dim = hidden_dim_mlp2
+        global_layers.append(nn.Linear(hidden_dim_mlp2, n_ts))
+        self.mlp2 = nn.Sequential(*global_layers)
 
     def forward(self, x):
         """
@@ -128,32 +119,59 @@ class BiDimensionalMLP(nn.Module):
         """
         B, T, N, F = x.shape
         
-        # Reshape so each series becomes a separate "sample"
-        x = x.permute(0, 2, 1, 3).reshape(B * N, T * F)   # (B*N, T*F)
-        
-        # Local processing: each series gets its own embedding
-        local_emb = self.local_mlp(x)                     # (B*N, d_model)
-        
-        # Reshape back to have the series dimension explicit
-        x_global = local_emb.view(B, N * self.d_model)    # (B, N*d_model)
-        
-        # Global mixing across series
-        out = self.global_mlp(x_global)                   # (B, N)
+        if self.first_direction == "T":
+
+            # Reshape so each series becomes a separate "sample"
+            x = x.permute(0, 2, 1, 3).reshape(B * N, T * F)   # (B*N, T*F)
+            
+            # Local processing: each series gets its own embedding
+            local_emb = self.mlp1(x)                     # (B*N, hidden_dim_mlp1)
+            
+            # Reshape back to have the series dimension explicit
+            x_global = local_emb.view(B, N * self.hidden_dim_mlp1)    # (B, N*hidden_dim_mlp1)
+            
+            # Global mixing across series
+            out = self.mlp2(x_global)                   # (B, N)
+
+        else:
+
+            x = x.reshape(B * T, N * F)   # (B*T, N*F)
+            
+            local_emb = self.mlp1(x)                     # (B*T, hidden_dim_mlp1)
+            
+            x_global = local_emb.view(B, T * self.hidden_dim_mlp1)    # (B, T*hidden_dim_mlp1)
+            
+            out = self.mlp2(x_global)                   # (B, N)
         
         return out
     
 
 
 class OneDimensionalTransformer(nn.Module):
-    def __init__(self, n_ts, n_f, n_rolling, mask=None, attn_direction="T", compression="SimpleLin", 
-                 d_model=128, num_layers_mlp=4, nhead=8, num_layers=2, dropout=0.2, roll_y=False,  sparsify=None):
+    def __init__(
+        self,
+        n_ts,
+        n_f, 
+        n_rolling,
+        mask,
+        attn_direction="T", # Should be "T" or "C"
+        compression="SimpleLin", # Should be "SimpleLin" or "MLP"         
+        d_model=128,
+        num_mlp_layers=4, # Only used when compression = "MLP"
+        nhead=8,
+        num_attn_layers=2,
+        dim_feedforward=512,
+        dropout=0.2,
+        sparsify=None,
+        roll_y=False
+    ):
         super().__init__()
         self.attn_direction = attn_direction # Should be "T" or "C" for time series or cross-sectional
-        self.compression = compression # Should be "Proj" or "MLP"
+        self.compression = compression 
         self.mask = mask
         self.sparsify = sparsify
         self.d_model = d_model
-        self.num_layers_mlp = num_layers_mlp
+        self.num_layers_mlp = num_mlp_layers
         self.roll_y = roll_y
 
         if attn_direction == "T":
@@ -168,7 +186,7 @@ class OneDimensionalTransformer(nn.Module):
         else: 
             mlp_layers = []
             dim = self.input_dim
-            for _ in range(num_layers_mlp):
+            for _ in range(num_mlp_layers):
                 mlp_layers.extend([
                     nn.Linear(dim, d_model),
                     nn.GELU(),
@@ -189,10 +207,10 @@ class OneDimensionalTransformer(nn.Module):
         encoder_layer = transformers.TransformerEncoderLayer(
             d_model=d_model,
             nhead=nhead,
-            dim_feedforward = 4 * d_model,
+            dim_feedforward = dim_feedforward,
             dropout=dropout,
         )
-        self.encoder = transformers.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.encoder = transformers.TransformerEncoder(encoder_layer, num_layers=num_attn_layers)
 
         
         self.output_head = nn.Sequential(
@@ -240,7 +258,7 @@ class CustomBiDimensionalTransformer(nn.Module):
         nhead=8,
         layers="TCTC",           
         dim_feedforward=512,
-        dropout=0.1,
+        dropout=0.2,
         sparsify=None,
         roll_y=False
     ):
