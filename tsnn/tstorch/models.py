@@ -1,5 +1,6 @@
 from torch import nn
 from tsnn.tstorch import transformers
+import torch
 
 """
 File contains four models:
