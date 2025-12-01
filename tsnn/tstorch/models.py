@@ -201,12 +201,21 @@ class OneDimensionalTransformer(nn.Module):
         )
         self.encoder = transformers.TransformerEncoder(encoder_layer, num_layers=num_attn_layers)
 
-        self.output_head = nn.Sequential(
-            nn.LayerNorm(d_model),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_model, 1)
-        )
+        if self.attn_direction == "T":
+            self.output_head = nn.Sequential(
+                nn.LayerNorm(d_model),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(d_model, n_ts)
+            )
+        else:
+            self.output_head = nn.Sequential(
+                nn.LayerNorm(d_model),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(d_model, 1)
+            )
+
 
     def forward(self, x, mask=None):
         # x: (batch, n_rolling, n_ts, n_f)
@@ -220,6 +229,13 @@ class OneDimensionalTransformer(nn.Module):
 
             x = self.encoder(x, mask=self.mask, sparsify=self.sparsify)
 
+            if self.roll_y == True:
+                return self.output_head(x)
+            
+            else:
+                return self.output_head(x[:, -1, :])
+
+
         else:
 
             x = x.transpose(1, 2).reshape(B, n_ts, n_rolling * n_f)
@@ -228,11 +244,8 @@ class OneDimensionalTransformer(nn.Module):
 
             x = self.encoder(x, sparsify=self.sparsify)
 
-        if self.roll_y == True and self.attn_direction == "T":
-            return self.output_head(x)
+            return self.output_head(x).squeeze(-1)
 
-        else:
-            return self.output_head(x[:, -1, :])
 
 
 class CustomBiDimensionalTransformer(nn.Module):
