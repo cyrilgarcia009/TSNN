@@ -132,6 +132,9 @@ class Generator:
         # CS relationships
         for k in range(start_cs_ft, end_cs_ft):
             X[k] = X[k] - corr_with_y[k] * y
+            y_cs = np.concatenate((y[:, 1:], y[:, :1]), axis=1)
+            # stock n feature k predicts stock n+1
+            X[k] = X[k] + corr_with_y[k] * y_cs
             cs_shift = np.concatenate((X[k][:, [-1]], X[k][:, 0:-1]), axis=1)
             self.y_pred_optimal += corr_with_y[k] * cs_shift
             self.y_cs += corr_with_y[k] * cs_shift
@@ -142,10 +145,10 @@ class Generator:
             n_shift = 1
 
             y_shifted = np.concatenate((y[n_shift:], y[:n_shift] * 0))
-            y_cs = np.concatenate((y[:, 1:], y[:, :1]), axis=1)
+            # y_cs = np.concatenate((y[:, 1:], y[:, :1]), axis=1)
             y_shifted_cs = np.concatenate((y_shifted[:, 1:], y_shifted[:, :1]), axis=1)
 
-            X[k] = X[k] - corr_with_y[k] * y_cs
+            # X[k] = X[k] - corr_with_y[k] * y_cs
             X[k] = X[k] + corr_with_y[k] * y_shifted_cs
 
             optimal_pred = np.concatenate((X[k][:n_shift] * 0, X[k][:-n_shift]))
