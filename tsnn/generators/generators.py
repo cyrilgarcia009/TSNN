@@ -100,13 +100,6 @@ class Generator:
         for k in range(start_random_ft):
             X[k] += corr_with_y[k] * y
 
-        # CS relationships
-        for k in range(start_cs_ft, end_cs_ft):
-            X[k] = X[k] - corr_with_y[k] * y
-            y_cs = np.concatenate((y[:, 1:], y[:, :1]), axis=1)
-            # stock n feature k predicts stock n+1
-            X[k] = X[k] + corr_with_y[k] * y_cs
-
         # Conditioning relationships (need to condition feature k by sign of feature)
         for k in range(start_cond_ft, end_cond_ft):
             X[k] = X[k] * np.sign(X[start_random_ft + k])
