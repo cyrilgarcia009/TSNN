@@ -82,10 +82,10 @@ class BiDimensionalMLP(nn.Module):
             self.input_dim1 = n_ts * n_f
             self.input_dim2 = n_rolling * hidden_dim_mlp1
 
-        local_layers = []
-        dim = n_rolling * n_f
-        for i in range(num_layers_mlp1):
-            local_layers.extend([
+        mlp1_layers = []
+        dim = self.input_dim1
+        for _ in range(num_layers_mlp1):
+            mlp1_layers.extend([
                 nn.Linear(dim, hidden_dim_mlp1),
                 nn.GELU(),
                 nn.Dropout(dropout),
@@ -93,21 +93,21 @@ class BiDimensionalMLP(nn.Module):
             ])
             dim = hidden_dim_mlp1
         # Final local projection
-        local_layers.append(nn.Linear(dim, hidden_dim_mlp1))
-        self.mlp1 = nn.Sequential(*local_layers)
+        mlp1_layers.append(nn.Linear(dim, hidden_dim_mlp1))
+        self.mlp1 = nn.Sequential(*mlp1_layers)
 
-        global_layers = []
-        dim = n_ts * hidden_dim_mlp1
-        for i in range(num_layers_mlp2):
-            global_layers.extend([
+        mlp2_layers = []
+        dim = self.input_dim2
+        for _ in range(num_layers_mlp2):
+            mlp2_layers.extend([
                 nn.Linear(dim, hidden_dim_mlp2),
                 nn.GELU(),
                 nn.Dropout(dropout),
                 nn.LayerNorm(hidden_dim_mlp2)
             ])
             dim = hidden_dim_mlp2
-        global_layers.append(nn.Linear(hidden_dim_mlp2, n_ts))
-        self.mlp2 = nn.Sequential(*global_layers)
+        mlp2_layers.append(nn.Linear(hidden_dim_mlp2, n_ts))
+        self.mlp2 = nn.Sequential(*mlp2_layers)
 
     def forward(self, x):
         """
@@ -117,16 +117,12 @@ class BiDimensionalMLP(nn.Module):
 
         if self.first_direction == "T":
 
-            # Reshape so each series becomes a separate "sample"
             x = x.permute(0, 2, 1, 3).reshape(B * N, T * F)  # (B*N, T*F)
 
-            # Local processing: each series gets its own embedding
             local_emb = self.mlp1(x)  # (B*N, hidden_dim_mlp1)
 
-            # Reshape back to have the series dimension explicit
             x_global = local_emb.view(B, N * self.hidden_dim_mlp1)  # (B, N*hidden_dim_mlp1)
 
-            # Global mixing across series
             out = self.mlp2(x_global)  # (B, N)
 
         else:
