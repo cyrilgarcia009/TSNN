@@ -1,5 +1,23 @@
 
+import torch
+from torch import nn
+from tsnn.tstorch import transformers
 
+
+"""
+File contains four models:
+
+i) GlobalMLP: Trivial MLP model without any structure, flattens N,F,T into input_dim = n_rolling * n_ts * n_f then applies an MLP.
+
+ii) BiDimensionalMLP: Applies succesively an MLP along a first direction then an MLP along the second. 
+The parameter first_direction specifies which dimension to treat first.
+
+iii) OneDimensionalTransformer: Applies num_layers of attention in one direction specified by the parameter attn_direction. 
+The other direction is compressed at the start using either a simple linear layer or an MLP.
+
+iv) CustomBiDimensionalTransformer: Most general model to apply attention layers in both directions. 
+Succesive layers are specified by for instance layers="TCTC", where "T" and "C" represent respectively time-series and cross-sectional attention.
+"""
 
 
 class GlobalMLP(nn.Module):
@@ -39,6 +57,8 @@ class GlobalMLP(nn.Module):
         return out
 
 
+
+# Model below is still work in progress...
 
 class BiDimensionalMLP(nn.Module):
     def __init__(
