@@ -145,10 +145,8 @@ class Generator:
             n_shift = 1
 
             y_shifted = np.concatenate((y[n_shift:], y[:n_shift] * 0))
-            # y_cs = np.concatenate((y[:, 1:], y[:, :1]), axis=1)
             y_shifted_cs = np.concatenate((y_shifted[:, 1:], y_shifted[:, :1]), axis=1)
 
-            # X[k] = X[k] - corr_with_y[k] * y_cs
             X[k] = X[k] + corr_with_y[k] * y_shifted_cs
 
             optimal_pred = np.concatenate((X[k][:n_shift] * 0, X[k][:-n_shift]))
