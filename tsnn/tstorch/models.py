@@ -189,8 +189,8 @@ class OneDimensionalTransformer(nn.Module):
             self.input_proj = nn.Sequential(*mlp_layers)
 
         # Positional encoding (learned or sinusoidal)
-        self.pos_emb_time = nn.Parameter(torch.randn(1, 1, d_model))
-        self.pos_emb_series = nn.Parameter(torch.randn(1, 1, d_model))
+        self.pos_emb_time = nn.Parameter(torch.randn(1, n_rolling, d_model))
+        self.pos_emb_series = nn.Parameter(torch.randn(1, n_ts, d_model))
 
         # Transformer encoder
         encoder_layer = transformers.TransformerEncoderLayer(
@@ -225,7 +225,7 @@ class OneDimensionalTransformer(nn.Module):
 
             x = x.reshape(B, n_rolling, n_ts * n_f)
 
-            x = self.input_proj(x) + self.pos_emb_time
+            x = self.input_proj(x) + self.pos_emb_time[:, :n_rolling, None, :]
 
             x = self.encoder(x, mask=self.mask, sparsify=self.sparsify)
 
@@ -240,7 +240,7 @@ class OneDimensionalTransformer(nn.Module):
 
             x = x.transpose(1, 2).reshape(B, n_ts, n_rolling * n_f)
 
-            x = self.input_proj(x) + self.pos_emb_series
+            x = self.input_proj(x) + self.pos_emb_series[:, None, :n_ts, :]
 
             x = self.encoder(x, sparsify=self.sparsify)
 
@@ -275,8 +275,10 @@ class CustomBiDimensionalTransformer(nn.Module):
         self.input_proj = nn.Linear(n_f, d_model)
 
         # Broadcasted positional embeddings
-        self.pos_emb_time = nn.Parameter(torch.randn(1, 1, d_model))
-        self.pos_emb_series = nn.Parameter(torch.randn(1, 1, d_model))
+        self.pos_emb_time = nn.Parameter(torch.randn(1, n_rolling, d_model))
+        self.pos_emb_series = nn.Parameter(torch.randn(1, n_ts, d_model))
+
+
         self.dropout = nn.Dropout(dropout)
 
         self.blocks = nn.ModuleList()
@@ -332,7 +334,7 @@ class CustomBiDimensionalTransformer(nn.Module):
         x = self.input_proj(x)
 
         # Add learnable positional embeddings (broadcasted over B, T, N)
-        x = x + self.pos_emb_time + self.pos_emb_series
+        x = x + self.pos_emb_time[:, :T, None, :] + self.pos_emb_series[:, None, :N, :]
         # x = self.dropout(x)
 
         # Process each block
