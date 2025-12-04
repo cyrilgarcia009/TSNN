@@ -225,7 +225,7 @@ class OneDimensionalTransformer(nn.Module):
 
             x = x.reshape(B, n_rolling, n_ts * n_f)
 
-            x = self.input_proj(x) + self.pos_emb_time[:, :n_rolling, None, :]
+            x = self.input_proj(x) + self.pos_emb_time[:, :n_rolling, :]
 
             x = self.encoder(x, mask=self.mask, sparsify=self.sparsify)
 
@@ -240,7 +240,7 @@ class OneDimensionalTransformer(nn.Module):
 
             x = x.transpose(1, 2).reshape(B, n_ts, n_rolling * n_f)
 
-            x = self.input_proj(x) + self.pos_emb_series[:, None, :n_ts, :]
+            x = self.input_proj(x) + self.pos_emb_series[:, :n_ts, :]
 
             x = self.encoder(x, sparsify=self.sparsify)
 
