@@ -9,11 +9,12 @@ from .. import utils
 
 
 class TorchWrapper:
-    def __init__(self, model, optimizer, loss_fn=nn.MSELoss(), device='mps'):
+    def __init__(self, model, optimizer, loss_fn=nn.MSELoss(), device='mps', grad_accum_steps=1):
         self.device = device
         self.model = model
         self.loss_fn = loss_fn
         self.optimizer = optimizer
+        self.grad_accum_steps = grad_accum_steps
         self.train_loss = []
         self.test_loss = []
         self.train_corr = []
@@ -24,19 +25,25 @@ class TorchWrapper:
         num_batches = len(dataloader)
         train_loss = 0
         train_corr = 0
+        accumulation_steps = 0
+
         for batch, (X, y) in enumerate(dataloader):
             X, y = X.to(self.device), y.to(self.device)
 
             pred = self.model(X)
-            # print(pred.shape, y.shape)
             loss = self.loss_fn(pred, y)
-            train_loss += loss.item()
+            loss = loss / self.grad_accum_steps
+
+            train_loss += loss.item() * self.grad_accum_steps
             train_corr += (np.corrcoef(pred.detach().flatten().to('cpu'),
                                        y.detach().flatten().to('cpu'))[0][1])
 
             loss.backward()
-            self.optimizer.step()
-            self.optimizer.zero_grad()
+
+            accumulation_steps += 1                                        
+            if accumulation_steps % self.grad_accum_steps == 0 or batch == num_batches - 1:
+                self.optimizer.step()
+                self.optimizer.zero_grad()
 
         train_loss /= num_batches
         train_corr /= num_batches
@@ -62,7 +69,10 @@ class TorchWrapper:
         self.test_loss.append(test_loss)
         self.test_corr.append(test_corr)
 
-    def fit(self, train, test=None, epochs=40, plot=True):
+    def fit(self, train, test=None, epochs=40, plot=True, grad_accum_steps=None):
+        if grad_accum_steps is not None:
+            self.grad_accum_steps = grad_accum_steps
+
         for t in tqdm(range(epochs)):
             self.train_loop(train)
             if test is not None:
