@@ -5,7 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 import math
 
-device = 'mps'
+#device = 'mps'
 
 
 def _get_clones(module, N):
@@ -55,7 +55,7 @@ def scaled_dot_product_attention(query, key, value, attn_mask=None, score_mod=No
 
         new_attn_mask = sparsify(avg_proba)
         new_attn_mask = new_attn_mask.bool()
-        new_attn_mask = new_attn_mask.to(device)
+        new_attn_mask = new_attn_mask.to(query.device)
 
         attn_bias = torch.zeros(attn_weight.shape[1], L, S, dtype=query.dtype, device=query.device)
         if new_attn_mask is not None:
