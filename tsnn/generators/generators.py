@@ -50,7 +50,6 @@ class Generator:
         :param pct_zero_corr: percentage of features with 0 correlation to y
         :return: torch datasets
         """
-        # todo: add non-linear dependencies
         assert split_conditional + split_shift + split_seasonal + split_cs + split_cs_shift <= 1
         y = np.random.multivariate_normal(mean=np.zeros(self.n_ts),
                                           cov=self.generate_covar(self.n_ts),

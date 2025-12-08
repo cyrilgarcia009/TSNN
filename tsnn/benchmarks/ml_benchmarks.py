@@ -42,3 +42,25 @@ class CustomBenchmark:
     def score(self, dataloader):
         X, y = utils.torch_to_np(dataloader)
         return np.corrcoef(self.model.predict(X), y)[0][1]
+
+
+class CustomBenchmarkRolling:
+    def __init__(self, model, n_rolling: int = 10):
+        """Greedy model which puts all features, all time series and all lags as variables considered"""
+        self.model = model
+        self.n_rolling = n_rolling
+
+    def fit(self, dataloader):
+        X, y = utils.torch_to_np_features(dataloader, n_rolling=self.n_rolling)
+        self.model.fit(X, y)
+
+    def predict(self, dataloader):
+        if hasattr(dataloader.dataset.dataset, 'y'):
+            X, y = utils.torch_to_np_features(dataloader, n_rolling=self.n_rolling)
+        else:
+            X = utils.torch_to_np_features(dataloader, n_rolling=self.n_rolling)
+        return self.model.predict(X)
+
+    def score(self, dataloader):
+        X, y = utils.torch_to_np_features(dataloader, n_rolling=self.n_rolling)
+        return np.corrcoef(self.model.predict(X), y)[0][1]

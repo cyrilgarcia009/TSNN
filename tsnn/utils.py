@@ -137,3 +137,50 @@ def torch_to_np(d):
         X_np = d.dataset.dataset.X[indices]
         X_np = torch.reshape(X_np, (X_np.shape[0] * X_np.shape[1], X_np.shape[2]))
         return X_np
+
+
+def shift_torch(x: torch.Tensor, n: int) -> torch.Tensor:
+    T = x.size(0)
+    if n == 0:
+        return x.clone()
+    out = torch.zeros_like(x)
+
+    if n > 0:
+        out[n:] = x[:-n]
+    else:
+        k = -n
+        out[:T - k] = x[k:]
+    return out
+
+
+def torch_to_np_features(d, n_rolling: int = 10):
+    indices = d.dataset.indices
+    if hasattr(d.dataset.dataset, 'y'):
+        X_np, y_np = d.dataset.dataset.X[indices], d.dataset.dataset.y[indices]
+        assert len(X_np.shape) == 3
+        T, n_ts = X_np.shape[0], X_np.shape[1]
+
+        # pb: y has to be aligned with X
+        y_np = y_np.reshape(y_np.shape[0] * y_np.shape[1])
+
+        # flatten all features
+        X_np = X_np.reshape(X_np.shape[0], -1)
+        # add lags
+        X_np = torch.cat([shift_torch(X_np, n=k) for k in range(n_rolling + 1)], dim=1)
+        X_np = torch.cat([X_np for _ in range(n_ts)], dim=1)
+        X_np = X_np.reshape(T * n_ts, -1)
+
+        return X_np, y_np
+    else:
+        X_np = d.dataset.dataset.X[indices]
+        assert len(X_np.shape) == 3
+        n_ts = X_np.shape[1]
+
+        # flatten all features
+        X_np = X_np.reshape(X_np.shape[0], -1)
+        # add lags
+        X_np = torch.cat([shift_torch(X_np, n=k) for k in range(n_rolling + 1)], dim=1)
+        X_np = torch.cat([X_np for _ in range(n_ts)], dim=1)
+        X_np = X_np.reshape(T * n_ts, -1)
+
+        return X_np
