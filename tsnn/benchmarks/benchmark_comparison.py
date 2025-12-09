@@ -4,7 +4,12 @@ from .. import utils
 
 
 class Comparator:
-    def __init__(self, models: list, model_names=None):
+    def __init__(self, models: list, model_names: list = None):
+        """
+        class comparing model performance
+        :param models: list of fitted models to compare
+        :param model_names: name of the models in the same order
+        """
         self.models = models
         if model_names is None:
             self.model_names = [f'model_{k}' for k in range(len(models))]
