@@ -69,14 +69,20 @@ class TorchWrapper:
         self.test_loss.append(test_loss)
         self.test_corr.append(test_corr)
 
-    def fit(self, train, test=None, epochs=40, plot=True, grad_accum_steps=None):
+    def fit(self, train, test=None, epochs=40, plot=True, grad_accum_steps=None, verbose=1):
         if grad_accum_steps is not None:
             self.grad_accum_steps = grad_accum_steps
 
-        for t in tqdm(range(epochs)):
-            self.train_loop(train)
-            if test is not None:
-                self.test_loop(test)
+        if verbose >= 1:
+            for t in tqdm(range(epochs)):
+                self.train_loop(train)
+                if test is not None:
+                    self.test_loop(test)
+        else:
+            for t in range(epochs):
+                self.train_loop(train)
+                if test is not None:
+                    self.test_loop(test)
         if plot:
             pd.concat([pd.Series(self.train_loss).rename('train_loss'),
                        pd.Series(self.test_loss).rename('test_loss')],
