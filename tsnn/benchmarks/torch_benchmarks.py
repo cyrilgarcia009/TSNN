@@ -97,7 +97,7 @@ class TorchWrapper:
 
     def predict(self, dataloader):
         if isinstance(dataloader, DataLoader):
-            non_shuffled = DataLoader(dataloader.dataset, batch_size=1024, num_workers=4, pin_memory=True,
+            non_shuffled = DataLoader(dataloader.dataset, batch_size=32, num_workers=4, pin_memory=True,
                                       shuffle=False, collate_fn=dataloader.collate_fn)
         else:
             raise UserWarning('dataloader should be a torch Dataset')
