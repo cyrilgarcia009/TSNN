@@ -1,10 +1,14 @@
-from sklearn.linear_model import LassoCV, RidgeCV, LinearRegression
+from sklearn.linear_model import LassoCV
 import numpy as np
 from .. import utils
 
 
 class LassoBenchmark:
     def __init__(self, alphas=100):
+        """
+        A simple cross-validated lasso benchmark
+        :param alphas:
+        """
         self.alphas = alphas
         self.model = LassoCV(alphas=alphas)
 
@@ -26,6 +30,10 @@ class LassoBenchmark:
 
 class CustomBenchmark:
     def __init__(self, model):
+        """
+        Generic class to be used with any model with fit and predict methods
+        :param model: model to use, for instance LinearRegression()
+        """
         self.model = model
 
     def fit(self, dataloader):
@@ -46,7 +54,11 @@ class CustomBenchmark:
 
 class CustomBenchmarkRolling:
     def __init__(self, model, n_rolling: int = 10):
-        """Greedy model which puts all features, all time series and all lags as variables considered"""
+        """
+        Greedy model which puts all features, all time series and all lags as variables considered
+        :param model: model to use, for instance LinearRegression()
+        :param n_rolling: number of time steps to consider in the model
+        """
         self.model = model
         self.n_rolling = n_rolling
 

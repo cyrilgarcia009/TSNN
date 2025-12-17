@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 from .. import utils
-import pandas as pd
 
 
 class Generator:

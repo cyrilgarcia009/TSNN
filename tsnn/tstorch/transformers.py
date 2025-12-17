@@ -5,8 +5,6 @@ from torch import nn
 import torch.nn.functional as F
 import math
 
-#device = 'mps'
-
 
 def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
