@@ -65,7 +65,7 @@ class Generator:
         corr_with_y = np.random.uniform(low=low_corr, high=high_corr, size=self.n_f)
         corr_with_y *= np.random.choice([-1, 1], self.n_f)
         # zero out some of the features correl
-        corr_with_y[int(self.n_f * (1-pct_zero_corr)):] = 0
+        corr_with_y[int(self.n_f * (1 - pct_zero_corr)):] = 0
 
         self.corr_with_y = torch.tensor(corr_with_y, dtype=torch.float32)
 
@@ -176,7 +176,7 @@ class Generator:
         self.ys['true'] = torch.from_numpy(y).to(dtype=torch.float32)
 
     def get_dataloader(self, n_rolling=1, narrow=False, train_test_split=True, shuffle=True, batch_size=256,
-                       roll_y=False):
+                       roll_y=False, add_noise=True, noise_scale=0.5):
         if self.X is None:
             raise UserWarning('Dataset not generated yet, please run generate_dataset() first')
 
@@ -189,12 +189,13 @@ class Generator:
                 self.ys[name] = self.ys[name].transpose(0, 1)
             self.is_transposed = False
 
-
         if train_test_split:
             self.train, self.test = utils.np_to_torch(self.X, self.y, n_rolling=n_rolling, narrow=narrow,
                                                       train_test_split=train_test_split, shuffle=shuffle,
-                                                      batch_size=batch_size, roll_y=roll_y)
+                                                      batch_size=batch_size, roll_y=roll_y, add_noise=add_noise,
+                                                      noise_scale=noise_scale)
         else:
             self.train = utils.np_to_torch(self.X, self.y, n_rolling=n_rolling, narrow=narrow,
                                            train_test_split=train_test_split, shuffle=shuffle,
-                                           batch_size=batch_size, roll_y=roll_y)
+                                           batch_size=batch_size, roll_y=roll_y, add_noise=add_noise,
+                                           noise_scale=noise_scale)

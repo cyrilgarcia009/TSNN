@@ -1,29 +1,40 @@
 import torch
 from torch.utils.data import random_split
 from torch.utils.data import DataLoader, Dataset, Subset
+import numpy as np
 
 
 class TorchDataset(Dataset):
-    def __init__(self, X, y=None):
+    def __init__(self, X, y=None, add_noise=False, noise_scale=0.5):
         self.X = X
         self.y = y
+        self.add_noise = add_noise
+        self.noise_scale = noise_scale
 
     def __len__(self):
         return len(self.X)
 
     def __getitem__(self, idx):
         if self.y is not None:
-            return self.X[idx], self.y[idx]
+            if self.add_noise:
+                return self.X[idx] + self.noise_scale * np.random.normal(size=self.X.shape[1]), self.y[idx]
+            else:
+                return self.X[idx], self.y[idx]
         else:
-            return self.X[idx]
+            if self.add_noise:
+                return self.X[idx] + self.noise_scale * np.random.normal(size=self.X.shape[1])
+            else:
+                return self.X[idx]
 
 
 class TorchDatasetRolling(Dataset):
-    def __init__(self, X, y=None, n=10, roll_y=False):
+    def __init__(self, X, y=None, n=10, roll_y=False, add_noise=False, noise_scale=0.5):
         self.X = X
         self.y = y
         self.n = n
         self.roll_y = roll_y
+        self.add_noise = add_noise
+        self.noise_scale = noise_scale
 
     def __len__(self):
         return len(self.X)
@@ -32,9 +43,23 @@ class TorchDatasetRolling(Dataset):
         start = max(0, idx - self.n + 1)
         if self.y is not None:
             if self.roll_y:
-                return self.X[start:idx + 1], self.y[start:idx + 1]
+                if self.add_noise:
+                    noise_shape = self.X[start:idx + 1].shape
+                    return (
+                        self.X[start:idx + 1] + self.noise_scale * np.random.normal(
+                            size=np.prod(noise_shape)).reshape(
+                            noise_shape),
+                        self.y[start:idx + 1])
+                else:
+                    return self.X[start:idx + 1], self.y[start:idx + 1]
             else:
-                return self.X[start:idx + 1], self.y[idx]
+                if self.add_noise:
+                    noise_shape = self.X[start:idx + 1].shape
+                    return self.X[start:idx + 1] + self.noise_scale * np.random.normal(
+                        size=np.prod(noise_shape)).reshape(
+                        noise_shape)
+                else:
+                    return self.X[start:idx + 1], self.y[idx]
         else:
             return self.X[start:idx + 1]
 
@@ -75,7 +100,7 @@ def collate_pad_beginning(batch, pad_value=0.0, max_len=None):
 
 
 def np_to_torch(X, y=None, train_test_split=True, train_pct=0.7, batch_size=256, shuffle=True, n_rolling=1,
-                ts_split=True, narrow=False, roll_y=False):
+                ts_split=True, narrow=False, roll_y=False, add_noise=False, noise_scale=0.5):
     """
     converts tensors to a torch dataset with option of having a train/test split
     :param X:
@@ -87,13 +112,17 @@ def np_to_torch(X, y=None, train_test_split=True, train_pct=0.7, batch_size=256,
     """
     if narrow and n_rolling == 1:
         dataset = TorchDataset(X.reshape((X.shape[0] * X.shape[1], X.shape[2])),
-                               y.reshape((y.shape[0] * y.shape[1], 1)))
+                               y.reshape((y.shape[0] * y.shape[1], 1)), add_noise=add_noise, noise_scale=noise_scale)
     elif narrow and (n_rolling > 1):
         dataset = TorchDatasetRolling(X.transpose(0, 1).reshape((X.shape[0] * X.shape[1], X.shape[2])),
                                       y.transpose(0, 1).reshape((y.shape[0] * y.shape[1], 1)),
-                                      n=n_rolling, roll_y=roll_y)
+                                      n=n_rolling, roll_y=roll_y, add_noise=add_noise, noise_scale=noise_scale)
     else:
-        dataset = TorchDataset(X, y) if n_rolling == 1 else TorchDatasetRolling(X, y, n=n_rolling, roll_y=roll_y)
+        dataset = TorchDataset(X, y, add_noise=add_noise,
+                               noise_scale=noise_scale) if n_rolling == 1 else TorchDatasetRolling(X, y, n=n_rolling,
+                                                                                                   roll_y=roll_y,
+                                                                                                   add_noise=add_noise,
+                                                                                                   noise_scale=noise_scale)
 
     if not train_test_split:
         return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle,
