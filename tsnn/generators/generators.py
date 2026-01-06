@@ -176,7 +176,7 @@ class Generator:
         self.ys['true'] = torch.from_numpy(y).to(dtype=torch.float32)
 
     def get_dataloader(self, n_rolling=1, narrow=False, train_test_split=True, shuffle=True, batch_size=256,
-                       roll_y=False, add_noise=True, noise_scale=0.5):
+                       roll_y=False, add_noise=False, noise_scale=0.5):
         if self.X is None:
             raise UserWarning('Dataset not generated yet, please run generate_dataset() first')
 
