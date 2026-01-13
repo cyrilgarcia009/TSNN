@@ -5,6 +5,7 @@ import pandas as pd
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 from .. import utils
 
 
@@ -48,7 +49,7 @@ class TorchWrapper:
 
             loss.backward()
 
-            accumulation_steps += 1                                        
+            accumulation_steps += 1
             if accumulation_steps % self.grad_accum_steps == 0 or batch == num_batches - 1:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
@@ -70,7 +71,6 @@ class TorchWrapper:
                 pred = self.model(X)
                 test_loss += self.loss_fn(pred, y).item()
                 test_corr += (np.corrcoef(pred.flatten().to('cpu'), y.flatten().to('cpu'))[0][1])
-
 
         test_loss /= num_batches
         test_corr /= num_batches
@@ -121,9 +121,9 @@ class TorchWrapper:
                 pred = self.model(X)
                 preds.append(pred.detach().cpu())
         preds = torch.cat(preds, dim=0).numpy()
-        #return preds.flatten()
+        # return preds.flatten()
 
-            # === NEW: Handle different output dimensions ===
+        # === NEW: Handle different output dimensions ===
         if preds.ndim == 2:
             return preds.flatten()
 
@@ -136,8 +136,38 @@ class TorchWrapper:
                 f"Model output has unsupported number of dimensions: {preds.ndim}. "
                 f"Got shape: {preds.shape}"
             )
-            
 
     def score(self, dataloader):
         X, y = utils.torch_to_np(dataloader)
         return np.corrcoef(self.predict(dataloader), y)[0][1]
+
+
+class MSELossWithL1Sparsity(nn.Module):
+    def __init__(self, model, lambda_l1=0.01, reduction='mean'):
+        super().__init__()
+        self.model = model
+        self.lambda_l1 = lambda_l1
+        self.reduction = reduction
+        self.mse_loss = nn.MSELoss(reduction=reduction)
+
+    def forward(self, pred, target):
+        mse = self.mse_loss(pred, target)
+
+        gated_coeffs_list = self.model.get_gated_coeffs()
+
+        l1_penalty = 0.0
+
+        if len(gated_coeffs_list) > 0:
+            for gated_coeffs in gated_coeffs_list:
+                # l1_penalty += torch.sum(torch.abs(gated_coeffs))
+
+                coef_mean = torch.mean(gated_coeffs)
+                # l1_penalty -= ttorchorch.sum(torch.abs(gated_coeffs-coef_mean))
+                # l1_penalty -= torch.sum(torch.clamp(gated_coeffs - coef_mean, 0, 1)**2)
+                l1_penalty -= torch.sum(gated_coeffs ** 2)
+        else:
+            raise ValueError('No gated coefficients found')
+
+        total_loss = mse + self.lambda_l1 * l1_penalty
+
+        return total_loss

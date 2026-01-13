@@ -1,6 +1,7 @@
 from torch import nn
 from tsnn.tstorch import transformers
 import torch
+import copy
 
 """
 File contains four models:
@@ -216,7 +217,6 @@ class OneDimensionalTransformer(nn.Module):
                 nn.Linear(d_model, 1)
             )
 
-
     def forward(self, x, mask=None):
         # x: (batch, n_rolling, n_ts, n_f)
         B, n_rolling, n_ts, n_f = x.shape
@@ -231,7 +231,7 @@ class OneDimensionalTransformer(nn.Module):
 
             if self.roll_y == True:
                 return self.output_head(x)
-            
+
             else:
                 return self.output_head(x[:, -1, :])
 
@@ -245,7 +245,6 @@ class OneDimensionalTransformer(nn.Module):
             x = self.encoder(x, sparsify=self.sparsify)
 
             return self.output_head(x).squeeze(-1)
-
 
 
 class CustomBiDimensionalTransformer(nn.Module):
@@ -277,7 +276,6 @@ class CustomBiDimensionalTransformer(nn.Module):
         # Broadcasted positional embeddings
         self.pos_emb_time = nn.Parameter(torch.randn(1, n_rolling, d_model))
         self.pos_emb_series = nn.Parameter(torch.randn(1, n_ts, d_model))
-
 
         self.dropout = nn.Dropout(dropout)
 
@@ -355,3 +353,127 @@ class CustomBiDimensionalTransformer(nn.Module):
             x = x[:, -1, :, :]  # Take last time step for forecasting
 
         return self.output_head(x).squeeze(-1)
+
+
+class CustomBiDimensionalTransformerSparse(nn.Module):
+    """
+    CustomBiDimensionalTransformer with L1-sparse diagonal-gated temporal attention.
+    Uses diagonal-gated coefficients for temporal (T) direction with L1 penalization.
+    """
+
+    def __init__(
+            self,
+            n_ts,
+            n_f,
+            n_rolling,
+            mask,
+            d_model=128,
+            nhead=8,
+            layers="TCTC",
+            dim_feedforward=512,
+            dropout=0.2,
+            sparsify=None,
+            roll_y=False,
+            lambda_l1=0.01
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.n_rolling = n_rolling
+        self.n_ts = n_ts
+        self.mask = mask
+        self.sparsify = sparsify
+        self.roll_y = roll_y
+        self.layers = layers
+        self.lambda_l1 = lambda_l1
+
+        self.input_proj = nn.Linear(n_f, d_model)
+
+        self.pos_emb_time = nn.Parameter(torch.randn(1, n_rolling, d_model))
+        self.pos_emb_series = nn.Parameter(torch.randn(1, n_ts, d_model))
+
+        self.dropout = nn.Dropout(dropout)
+
+        self.blocks = nn.ModuleList()
+        for symbol in layers:
+            if symbol == 'T':
+                temporal_layer = transformers.DiagonalGatedTemporalEncoderLayer(
+                    d_model, nhead, dim_feedforward, dropout,
+                    max_seq_len=n_rolling
+                )
+
+                self.blocks.append(nn.ModuleDict({
+                    'temporal_l1_gated': temporal_layer,
+                    'norm': nn.LayerNorm(d_model),
+                }))
+            elif symbol == 'C':
+                series_layer = transformers.TransformerEncoderLayer(
+                    d_model, nhead, dim_feedforward, dropout
+                )
+                self.blocks.append(nn.ModuleDict({
+                    'series': series_layer,
+                    'norm': nn.LayerNorm(d_model),
+                }))
+            else:
+                raise ValueError(f"Invalid character in layers string: '{symbol}'. Only 'T' and 'C' are allowed.")
+
+        self.output_head = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model, 1)
+        )
+
+        self._last_gated_coeffs = []
+
+    def series_attention(self, x, attn_layer):
+        B, T, N, D = x.shape
+        x_flat = x.view(B * T, N, D)
+        out = attn_layer.self_attn(x_flat, x_flat, x_flat)
+        out = out.view(B, T, N, D)
+        return out
+
+    def temporal_attention(self, x, attn_encoder):
+        B, T, N, D = x.shape
+        x_flat = x.transpose(1, 2).contiguous().view(B * N, T, D)
+        out = attn_encoder(x_flat, mask=self.mask, sparsify=self.sparsify)
+        out = out.view(B, N, T, D).transpose(1, 2)
+        return out
+
+    def temporal_attention_l1_gated(self, x, attn_layer):
+        B, T, N, D = x.shape
+        x_flat = x.transpose(1, 2).contiguous().view(B * N, T, D)
+        out, gated_coeffs = attn_layer(x_flat, attn_mask=self.mask, is_causal=True)
+        out = out.view(B, N, T, D).transpose(1, 2)
+        return out, gated_coeffs
+
+    def forward(self, x):
+
+        B, T, N, _ = x.shape
+        x = self.input_proj(x)
+
+        x = x + self.pos_emb_time[:, :T, None, :] + self.pos_emb_series[:, None, :N, :]
+        self._last_gated_coeffs = []
+
+        for block in self.blocks:
+            res = x
+
+            if 'temporal_l1_gated' in block:
+                x_att, gated_coeffs = self.temporal_attention_l1_gated(x, block['temporal_l1_gated'])
+                x = block['norm'](res + self.dropout(x_att).contiguous())
+                self._last_gated_coeffs.append(gated_coeffs)
+
+            elif 'temporal' in block:
+                x_att = self.temporal_attention(x, block['temporal'])
+                x = block['norm'](res + self.dropout(x_att).contiguous())
+
+            elif 'series' in block:
+                x_att = self.series_attention(x, block['series'])
+                x = block['norm'](res + self.dropout(x_att).contiguous())
+
+        if not self.roll_y:
+            x = x[:, -1, :, :]
+
+        return self.output_head(x).squeeze(-1)
+
+    def get_gated_coeffs(self):
+        return self._last_gated_coeffs
