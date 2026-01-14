@@ -43,7 +43,8 @@ class Generator:
 
     def generate_dataset(self, pct_zero_corr: float = 0.5, split_conditional: float = 0.3, split_shift: float = 0.0,
                          split_seasonal: float = 0.0, split_cs: float = 0.0, split_cs_shift: float = 0.0,
-                         low_corr: float = 0.005, high_corr: float = 0.03) -> None:
+                         low_corr: float = 0.005, high_corr: float = 0.03,
+                         random_ts_shift: int = 1, shuffle_cs: bool = True) -> None:
         """
 
         :param pct_zero_corr: percentage of features with 0 correlation to y
@@ -105,9 +106,12 @@ class Generator:
             self.y_pred_optimal += optimal_pred
             self.y_conditional += optimal_pred
 
-        # Shift relationships - shift could be variable by feature
+        # Shift relationships - shift variable by feature
         for k in range(start_shift_ft, end_shift_ft):
-            n_shift = 1
+            if random_ts_shift > 1:
+                n_shift = np.random.randint(1, random_ts_shift)
+            else:
+                n_shift = 1
             y_shifted = np.concatenate((y[n_shift:], y[:n_shift] * 0))
 
             X[k] = X[k] - corr_with_y[k] * y
@@ -130,17 +134,29 @@ class Generator:
         # CS relationships
         for k in range(start_cs_ft, end_cs_ft):
             X[k] = X[k] - corr_with_y[k] * y
-            y_cs = np.concatenate((y[:, 1:], y[:, :1]), axis=1)
-            # stock n feature k predicts stock n+1
-            X[k] = X[k] + corr_with_y[k] * y_cs
-            cs_shift = np.concatenate((X[k][:, [-1]], X[k][:, 0:-1]), axis=1)
-            self.y_pred_optimal += corr_with_y[k] * cs_shift
-            self.y_cs += corr_with_y[k] * cs_shift
+            # stock n feature k predicts stock k+1
+            if shuffle_cs:
+                permutation = utils.generate_derangement(X.shape[2])
+                permutation_inv = {permutation[k]: k for k in range(len(permutation))}
+                y_cs = y[:, [permutation_inv[k] for k in range(y.shape[1])]]
+                X[k] = X[k] + corr_with_y[k] * y_cs
+                cs_shift = X[k][:, permutation]
+                self.y_pred_optimal += corr_with_y[k] * cs_shift
+                self.y_cs += corr_with_y[k] * cs_shift
+            else:
+                y_cs = np.concatenate((y[:, 1:], y[:, :1]), axis=1)
+                X[k] = X[k] + corr_with_y[k] * y_cs
+                cs_shift = np.concatenate((X[k][:, [-1]], X[k][:, 0:-1]), axis=1)
+                self.y_pred_optimal += corr_with_y[k] * cs_shift
+                self.y_cs += corr_with_y[k] * cs_shift
 
         # CS + Shift relationships - shift could be variable
         for k in range(start_cs_shift_ft, end_cs_shift_ft):
             X[k] = X[k] - corr_with_y[k] * y
-            n_shift = 1
+            if random_ts_shift > 1:
+                n_shift = np.random.randint(1, random_ts_shift)
+            else:
+                n_shift = 1
 
             y_shifted = np.concatenate((y[n_shift:], y[:n_shift] * 0))
             y_shifted_cs = np.concatenate((y_shifted[:, 1:], y_shifted[:, :1]), axis=1)

@@ -218,3 +218,11 @@ def torch_to_np_features(d, n_rolling: int = 10):
         return X_np, y_np
 
     return X_np
+
+
+def generate_derangement(n):
+    rng = np.random.default_rng()
+    while True:
+        p = rng.permutation(n)
+        if not np.any(p == np.arange(n)):
+            return p
