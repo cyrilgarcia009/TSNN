@@ -184,32 +184,37 @@ def shift_torch(x: torch.Tensor, n: int) -> torch.Tensor:
 
 def torch_to_np_features(d, n_rolling: int = 10):
     indices = d.dataset.indices
-    if hasattr(d.dataset.dataset, 'y'):
-        X_np, y_np = d.dataset.dataset.X[indices], d.dataset.dataset.y[indices]
-        assert len(X_np.shape) == 3
-        T, n_ts = X_np.shape[0], X_np.shape[1]
+    dataset = d.dataset.dataset
 
-        # pb: y has to be aligned with X
+    X = dataset.X[indices]
+    assert X.ndim == 3  # (T, N, F)
+    T, N, F = X.shape
+
+    if hasattr(dataset, 'y'):
+        y_np = dataset.y[indices]
         y_np = y_np.reshape(y_np.shape[0] * y_np.shape[1])
 
-        # flatten all features
-        X_np = X_np.reshape(X_np.shape[0], -1)
-        # add lags
-        X_np = torch.cat([shift_torch(X_np, n=k) for k in range(n_rolling + 1)], dim=1)
-        X_np = torch.cat([X_np for _ in range(n_ts)], dim=1)
-        X_np = X_np.reshape(T * n_ts, -1)
+    X_out = []
 
+    for i in range(N):
+        # reorder stocks in a cyclical way
+        X_reordered = torch.cat(
+            [X[:, i:], X[:, :i]],
+            dim=1
+        )
+        X_flat = X_reordered.reshape(T, -1)
+
+        X_lagged = torch.cat(
+            [shift_torch(X_flat, n=k) for k in range(n_rolling)],
+            dim=1
+        )
+
+        X_out.append(X_lagged)
+
+    X_np = torch.cat(X_out, dim=1)
+    X_np = X_np.reshape(T * N, -1)
+
+    if hasattr(dataset, 'y'):
         return X_np, y_np
-    else:
-        X_np = d.dataset.dataset.X[indices]
-        assert len(X_np.shape) == 3
-        n_ts = X_np.shape[1]
 
-        # flatten all features
-        X_np = X_np.reshape(X_np.shape[0], -1)
-        # add lags
-        X_np = torch.cat([shift_torch(X_np, n=k) for k in range(n_rolling + 1)], dim=1)
-        X_np = torch.cat([X_np for _ in range(n_ts)], dim=1)
-        X_np = X_np.reshape(T * n_ts, -1)
-
-        return X_np
+    return X_np
