@@ -48,6 +48,16 @@ class Generator:
         """
 
         :param pct_zero_corr: percentage of features with 0 correlation to y
+        :param split_conditional: pct of conditional features
+        :param split_shift: pct of temporal shift (lag) features
+        :param split_seasonal: pct of seasonal features
+        :param split_cs: pct of CS features (ts 1 predicts ts 4)
+        :param split_cs_shift: pct of lag + CS features (ts 1 lagged predicts ts 4)
+        :param low_corr: lowest correlation to generate uniform correl dist from
+        :param high_corr: highest correlation to generate uniform correl dist from
+        :param random_ts_shift: number max of lag to generate lag randomly by feature
+        :param shuffle_cs: if True, orders the CS effect randomly
+        :return:
         :return: torch datasets
         """
         assert split_conditional + split_shift + split_seasonal + split_cs + split_cs_shift <= 1
