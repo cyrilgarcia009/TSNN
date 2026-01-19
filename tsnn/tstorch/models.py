@@ -260,7 +260,8 @@ class CustomBiDimensionalTransformer(nn.Module):
             dim_feedforward=512,
             dropout=0.2,
             sparsify=None,
-            roll_y=False
+            roll_y=False,
+            embeddings="both",
     ):
         super().__init__()
         self.d_model = d_model
@@ -276,6 +277,7 @@ class CustomBiDimensionalTransformer(nn.Module):
         # Broadcasted positional embeddings
         self.pos_emb_time = nn.Parameter(torch.randn(1, n_rolling, d_model))
         self.pos_emb_series = nn.Parameter(torch.randn(1, n_ts, d_model))
+        self.embeddings = embeddings
 
         self.dropout = nn.Dropout(dropout)
 
@@ -293,11 +295,14 @@ class CustomBiDimensionalTransformer(nn.Module):
                     'norm': nn.LayerNorm(d_model),
                 }))
             elif symbol == 'C':
-                series_layer = transformers.TransformerEncoderLayer(
-                    d_model, nhead, dim_feedforward, dropout
+                series_encoder = transformers.TransformerEncoder(
+                    transformers.TransformerEncoderLayer(
+                        d_model, nhead, dim_feedforward, dropout
+                    ),
+                    num_layers=1
                 )
                 self.blocks.append(nn.ModuleDict({
-                    'series': series_layer,
+                    'series': series_encoder,
                     'norm': nn.LayerNorm(d_model),
                 }))
             else:
@@ -310,11 +315,11 @@ class CustomBiDimensionalTransformer(nn.Module):
             nn.Linear(d_model, 1)
         )
 
-    def series_attention(self, x, attn_layer):
+    def series_attention(self, x, attn_encoder):
         """Cross-sectional attention: attend over the N series dimension independently for each (B,T)"""
         B, T, N, D = x.shape
         x_flat = x.view(B * T, N, D)
-        out = attn_layer.self_attn(x_flat, x_flat, x_flat)
+        out = attn_encoder(x_flat, sparsify=self.sparsify)
         out = out.view(B, T, N, D)
         return out
 
@@ -332,7 +337,13 @@ class CustomBiDimensionalTransformer(nn.Module):
         x = self.input_proj(x)
 
         # Add learnable positional embeddings (broadcasted over B, T, N)
-        x = x + self.pos_emb_time[:, :T, None, :] + self.pos_emb_series[:, None, :N, :]
+        if self.embeddings=="both":
+            x = x + self.pos_emb_time[:, :T, None, :]  + self.pos_emb_series[:, None, :N, :]
+        elif self.embeddings=="C":
+            x = x + self.pos_emb_series[:, None, :N, :]
+        elif self.embeddings=="T":
+            x = x + self.pos_emb_time[:, :T, None, :]
+
         # x = self.dropout(x)
 
         # Process each block
