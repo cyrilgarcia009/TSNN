@@ -201,6 +201,164 @@ class Generator:
         self.ys['cs_shift'] = torch.from_numpy(self.y_cs_shift).to(dtype=torch.float32)
         self.ys['true'] = torch.from_numpy(y).to(dtype=torch.float32)
 
+    def generate_dataset_gr_simple(self, global_corr=0.1, correl_split_by_fea=None, list_type_effects = None,
+                            list_type_interaction = ["cond", "rev_cond", "product"], random_ts_shift: int = 1,
+                            CS_symmetry_ts_shift=True, indexes_apply_nonlin = None) -> None:
+                         
+        X = np.array([np.random.multivariate_normal(mean=np.zeros(self.n_ts),
+                                                    cov=np.eye(self.n_ts),
+                                                    size=self.T) for _ in range(self.n_f)])
+        
+
+        self.y_pred_optimal = np.zeros((self.T, self.n_ts))
+        self.y_linear = np.zeros((self.T, self.n_ts))
+        self.y_conditional = np.zeros((self.T, self.n_ts))
+        self.y_shift = np.zeros((self.T, self.n_ts))
+        self.y_seasonal = np.zeros((self.T, self.n_ts))
+        self.y_cs = np.zeros((self.T, self.n_ts))
+        self.y_cs_shift = np.zeros((self.T, self.n_ts))
+        self.y_conditional_ts = np.zeros((self.T, self.n_ts))
+        self.y_conditional_cs = np.zeros((self.T, self.n_ts))
+
+        if correl_split_by_fea is None:
+            # If no list is provided we just do uniform accross all features
+            correl_split_by_fea = [1/np.sqrt(self.n_f)]*self.n_f
+        correl_level_by_fea = np.array(correl_split_by_fea) * global_corr
+
+        if list_type_effects is None:
+            # By default create a list containing just the TS shift effect
+            list_type_effects = ['TS_shift']*self.n_f
+
+        # The possible effects are: lin, TS_shift, CS_shift, TSCS_shift, fea_cond, TS_cond, CS_cond
+        for (ind, fea) in enumerate(list_type_effects):
+
+            if fea == "lin":
+                optimal_pred = X[ind] * correl_level_by_fea[ind]
+
+                self.y_linear += optimal_pred
+                self.y_pred_optimal += optimal_pred
+            
+            elif fea == "TS_shift":
+                if random_ts_shift > 1:
+                    n_shift = np.random.randint(1, random_ts_shift)
+                else:
+                    n_shift = 1
+                    
+                optimal_pred = np.concatenate((X[ind][:n_shift] * 0, X[ind][:-n_shift])) * correl_level_by_fea[ind]
+
+                self.y_pred_optimal += optimal_pred
+                self.y_shift += optimal_pred
+
+            elif fea == "CS_shift":
+                permutation = utils.generate_derangement(X.shape[2])
+                optimal_pred = X[ind][:, permutation] * correl_level_by_fea[ind]
+                self.y_pred_optimal += optimal_pred
+                self.y_cs += optimal_pred
+            
+            elif fea == "TSCS_shift":
+                if random_ts_shift > 1:
+                    n_shift = np.random.randint(1, random_ts_shift)
+                else:
+                    n_shift = 1
+                
+                optimal_pred = np.concatenate((X[ind][:n_shift] * 0, X[ind][:-n_shift]))
+                permutation = utils.generate_derangement(X.shape[2])
+                optimal_pred = optimal_pred[:, permutation] * correl_level_by_fea[ind]
+                self.y_pred_optimal += optimal_pred
+                self.y_cs_shift += optimal_pred
+            
+            elif fea == "fea_cond":
+                valid_indices = np.delete(np.arange(self.n_f), ind)
+                ind2 = np.random.choice(valid_indices)
+                inter_type = np.random.choice(list_type_interaction)
+
+                if inter_type == "cond":
+                    optimal_pred = X[ind] * np.sign(X[ind2]) * correl_level_by_fea[ind]
+                    self.y_pred_optimal += optimal_pred
+                    self.y_conditional += optimal_pred
+
+                elif inter_type == "rev_cond":
+                    optimal_pred = X[ind2] * np.sign(X[ind]) * correl_level_by_fea[ind]
+                    self.y_pred_optimal += optimal_pred
+                    self.y_conditional += optimal_pred
+
+                else:
+                    optimal_pred = X[ind] * X[ind2] * correl_level_by_fea[ind]
+                    self.y_pred_optimal += optimal_pred
+                    self.y_conditional += optimal_pred
+
+            elif fea == "TS_cond":
+                if random_ts_shift > 1:
+                    n_shift = np.random.randint(1, random_ts_shift)
+                else:
+                    n_shift = 1
+                
+                conditioner = np.concatenate((X[ind][:n_shift] * 0, X[ind][:-n_shift]))
+                inter_type = np.random.choice(list_type_interaction)
+
+
+                if inter_type == "cond":
+                    optimal_pred = X[ind] * np.sign(conditioner) * correl_level_by_fea[ind]
+                    self.y_pred_optimal += optimal_pred
+                    self.y_conditional_ts += optimal_pred
+
+                elif inter_type == "rev_cond":
+                    optimal_pred = conditioner * np.sign(X[ind]) * correl_level_by_fea[ind]
+                    self.y_pred_optimal += optimal_pred
+                    self.y_conditional_ts += optimal_pred
+
+                else:
+                    optimal_pred = X[ind] * conditioner * correl_level_by_fea[ind]
+                    self.y_pred_optimal += optimal_pred
+                    self.y_conditional_ts += optimal_pred
+
+            elif fea == "CS_cond":
+                permutation = utils.generate_derangement(X.shape[2])
+                conditioner = X[ind][:, permutation]
+
+                inter_type = np.random.choice(list_type_interaction)
+
+                if inter_type == "cond":
+                    optimal_pred = X[ind] * np.sign(conditioner) * correl_level_by_fea[ind]
+                    self.y_pred_optimal += optimal_pred
+                    self.y_conditional_cs += optimal_pred
+
+                elif inter_type == "rev_cond":
+                    optimal_pred = conditioner * np.sign(X[ind]) * correl_level_by_fea[ind]
+                    self.y_pred_optimal += optimal_pred
+                    self.y_conditional_cs += optimal_pred
+
+                else:
+                    optimal_pred = X[ind] * conditioner * correl_level_by_fea[ind]
+                    self.y_pred_optimal += optimal_pred
+                    self.y_conditional_cs += optimal_pred
+
+        noise = np.random.normal(
+            loc=0, 
+            scale=np.sqrt(1 - global_corr**2), 
+            size=(self.T, self.n_ts)
+        )
+
+        y = self.y_pred_optimal + noise
+
+        X = torch.from_numpy(X)
+        X = torch.transpose(X, 0, 1)
+        X = torch.transpose(X, 1, 2)
+
+        self.X = X.to(dtype=torch.float32)
+        self.y = torch.from_numpy(y).to(dtype=torch.float32)
+
+        self.ys['optimal'] = torch.from_numpy(self.y_pred_optimal).to(dtype=torch.float32)
+        self.ys['linear'] = torch.from_numpy(self.y_linear).to(dtype=torch.float32)
+        self.ys['shift'] = torch.from_numpy(self.y_shift).to(dtype=torch.float32)
+        self.ys['seasonal'] = torch.from_numpy(self.y_seasonal).to(dtype=torch.float32)
+        self.ys['conditional'] = torch.from_numpy(self.y_conditional).to(dtype=torch.float32)
+        self.ys['conditional_ts'] = torch.from_numpy(self.y_conditional_ts).to(dtype=torch.float32)
+        self.ys['conditional_cs'] = torch.from_numpy(self.y_conditional_cs).to(dtype=torch.float32)
+        self.ys['cs'] = torch.from_numpy(self.y_cs).to(dtype=torch.float32)
+        self.ys['cs_shift'] = torch.from_numpy(self.y_cs_shift).to(dtype=torch.float32)
+        self.ys['true'] = torch.from_numpy(y).to(dtype=torch.float32)
+
     def get_dataloader(self, n_rolling=1, narrow=False, train_test_split=True, shuffle=True, batch_size=256,
                        roll_y=False, add_noise=False, noise_scale=0.5):
         if self.X is None:
