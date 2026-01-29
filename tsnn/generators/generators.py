@@ -168,17 +168,32 @@ class Generator:
             else:
                 n_shift = 1
 
-            y_shifted = np.concatenate((y[n_shift:], y[:n_shift] * 0))
-            y_shifted_cs = np.concatenate((y_shifted[:, 1:], y_shifted[:, :1]), axis=1)
+            if shuffle_cs:
+                permutation = utils.generate_derangement(X.shape[2])
+                permutation_inv = {permutation[k]: k for k in range(len(permutation))}
+                y_shifted = np.concatenate((y[n_shift:], y[:n_shift] * 0))
+                y_shifted_cs = y_shifted[:, [permutation_inv[k] for k in range(y.shape[1])]]
 
-            X[k] = X[k] + corr_with_y[k] * y_shifted_cs
+                X[k] = X[k] + corr_with_y[k] * y_shifted_cs
 
-            optimal_pred = np.concatenate((X[k][:n_shift] * 0, X[k][:-n_shift]))
-            optimal_pred = np.concatenate((optimal_pred[:, [-1]], optimal_pred[:, :-1]), axis=1)
-            optimal_pred = optimal_pred * corr_with_y[k]
+                optimal_pred = np.concatenate((X[k][:n_shift] * 0, X[k][:-n_shift]))
+                optimal_pred = optimal_pred[:, permutation] * corr_with_y[k]
 
-            self.y_pred_optimal += optimal_pred
-            self.y_cs_shift += optimal_pred
+                self.y_pred_optimal += optimal_pred
+                self.y_cs_shift += optimal_pred
+
+            else:
+                y_shifted = np.concatenate((y[n_shift:], y[:n_shift] * 0))
+                y_shifted_cs = np.concatenate((y_shifted[:, 1:], y_shifted[:, :1]), axis=1)
+
+                X[k] = X[k] + corr_with_y[k] * y_shifted_cs
+
+                optimal_pred = np.concatenate((X[k][:n_shift] * 0, X[k][:-n_shift]))
+                optimal_pred = np.concatenate((optimal_pred[:, [-1]], optimal_pred[:, :-1]), axis=1)
+                optimal_pred = optimal_pred * corr_with_y[k]
+
+                self.y_pred_optimal += optimal_pred
+                self.y_cs_shift += optimal_pred
 
         # Adding the usual linear relationships to the optimal pred
         for k in range(end_cs_shift_ft, start_random_ft):
