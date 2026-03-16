@@ -55,9 +55,12 @@ class TorchDatasetRolling(Dataset):
             else:
                 if self.add_noise:
                     noise_shape = self.X[start:idx + 1].shape
-                    return self.X[start:idx + 1] + self.noise_scale * np.random.normal(
-                        size=np.prod(noise_shape)).reshape(
-                        noise_shape)
+                    return (
+                        self.X[start:idx + 1] + self.noise_scale * np.random.normal(
+                            size=np.prod(noise_shape)).reshape(
+                            noise_shape),
+                        self.y[idx]
+                    )
                 else:
                     return self.X[start:idx + 1], self.y[idx]
         else:
