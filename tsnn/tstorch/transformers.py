@@ -7,11 +7,11 @@ import torch.nn.functional as F
 import math
 
 
-def _get_clones(module, N):
+def _get_clones(module: nn.Module, N: int) -> nn.ModuleList:
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
-def keep_topk_per_row(x, k=2):
+def keep_topk_per_row(x: torch.Tensor, k: int = 2) -> torch.Tensor:
     vals, idx = torch.topk(x, k=k, dim=-1, largest=True)
     out = torch.zeros_like(x)
     out.scatter_(-1, idx, 1)
@@ -22,9 +22,9 @@ _attn_weights = []
 _attn_softmax = []
 
 
-def scaled_dot_product_attention(query, key, value, attn_mask=None, score_mod=None, dropout_p=0.0,
-                                 is_causal=False, scale=None, enable_gqa=False, sparsify=None,
-                                 training=True) -> torch.Tensor:
+def scaled_dot_product_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, attn_mask=None,
+                                 score_mod=None, dropout_p: float = 0.0, is_causal: bool = False, scale=None,
+                                 enable_gqa: bool = False, sparsify=None, training: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
     L, S = query.size(-2), key.size(-2)
     scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
     attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
@@ -66,6 +66,7 @@ def scaled_dot_product_attention(query, key, value, attn_mask=None, score_mod=No
         attn_weight += attn_bias
 
     attn_soft = torch.softmax(attn_weight, dim=-1)
+    # Respect module train/eval mode so inference stays deterministic.
     attn_soft = torch.dropout(attn_soft, dropout_p, train=training)
 
     return attn_soft @ value, torch.softmax(attn_weight, dim=-1)
@@ -203,7 +204,8 @@ class TransformerEncoder(nn.Module):
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self, src: torch.Tensor, mask: Optional[torch.Tensor] = None, is_causal=False, sparsify=None):
+    def forward(self, src: torch.Tensor, mask: Optional[torch.Tensor] = None, is_causal: bool = False,
+                sparsify=None) -> torch.Tensor:
         output = src
         for mod in self.layers:
             output = mod(output, attn_mask=mask, is_causal=is_causal, sparsify=sparsify)

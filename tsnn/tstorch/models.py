@@ -46,7 +46,7 @@ class GlobalMLP(nn.Module):
 
         self.network = nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         x: (B, T, N, F)
         """
@@ -110,7 +110,7 @@ class BiDimensionalMLP(nn.Module):
         mlp2_layers.append(nn.Linear(hidden_dim_mlp2, n_ts))
         self.mlp2 = nn.Sequential(*mlp2_layers)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         x: (B, T, N, F)
         """
@@ -217,7 +217,7 @@ class OneDimensionalTransformer(nn.Module):
                 nn.Linear(d_model, 1)
             )
 
-    def forward(self, x, mask=None):
+    def forward(self, x: torch.Tensor, mask=None) -> torch.Tensor:
         # x: (batch, n_rolling, n_ts, n_f)
         B, n_rolling, n_ts, n_f = x.shape
 
@@ -315,7 +315,7 @@ class CustomBiDimensionalTransformer(nn.Module):
             nn.Linear(d_model, 1)
         )
 
-    def series_attention(self, x, attn_encoder):
+    def series_attention(self, x: torch.Tensor, attn_encoder) -> torch.Tensor:
         """Cross-sectional attention: attend over the N series dimension independently for each (B,T)"""
         B, T, N, D = x.shape
         x_flat = x.view(B * T, N, D)
@@ -323,7 +323,7 @@ class CustomBiDimensionalTransformer(nn.Module):
         out = out.view(B, T, N, D)
         return out
 
-    def temporal_attention(self, x, attn_encoder):
+    def temporal_attention(self, x: torch.Tensor, attn_encoder) -> torch.Tensor:
         """Temporal attention: attend over the T time dimension independently for each series"""
         B, T, N, D = x.shape
         x_flat = x.transpose(1, 2).contiguous().view(B * N, T, D)
@@ -331,7 +331,7 @@ class CustomBiDimensionalTransformer(nn.Module):
         out = out.view(B, N, T, D).transpose(1, 2)
         return out
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (B, T, N, F)
         B, T, N, _ = x.shape
         x = self.input_proj(x)
@@ -436,28 +436,31 @@ class CustomBiDimensionalTransformerSparse(nn.Module):
 
         self._last_gated_coeffs = []
 
-    def series_attention(self, x, attn_layer):
+    def series_attention(self, x: torch.Tensor, attn_layer) -> torch.Tensor:
         B, T, N, D = x.shape
+        # Attend over the series axis independently at each time step.
         x_flat = x.view(B * T, N, D)
         out = attn_layer(x_flat, sparsify=self.sparsify)
         out = out.view(B, T, N, D)
         return out
 
-    def temporal_attention(self, x, attn_encoder):
+    def temporal_attention(self, x: torch.Tensor, attn_encoder) -> torch.Tensor:
         B, T, N, D = x.shape
+        # Attend over time independently for each series.
         x_flat = x.transpose(1, 2).contiguous().view(B * N, T, D)
         out = attn_encoder(x_flat, mask=self.mask, sparsify=self.sparsify)
         out = out.view(B, N, T, D).transpose(1, 2)
         return out
 
-    def temporal_attention_l1_gated(self, x, attn_layer):
+    def temporal_attention_l1_gated(self, x: torch.Tensor, attn_layer) -> tuple[torch.Tensor, torch.Tensor]:
         B, T, N, D = x.shape
+        # Temporal sparse block also returns the gated lag coefficients.
         x_flat = x.transpose(1, 2).contiguous().view(B * N, T, D)
         out, gated_coeffs = attn_layer(x_flat, attn_mask=self.mask, is_causal=True)
         out = out.view(B, N, T, D).transpose(1, 2)
         return out, gated_coeffs
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
 
         B, T, N, _ = x.shape
         x = self.input_proj(x)
@@ -486,5 +489,5 @@ class CustomBiDimensionalTransformerSparse(nn.Module):
 
         return self.output_head(x).squeeze(-1)
 
-    def get_gated_coeffs(self):
+    def get_gated_coeffs(self) -> list[torch.Tensor]:
         return self._last_gated_coeffs

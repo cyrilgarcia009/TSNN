@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 from torch.utils.data import random_split
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -5,16 +7,17 @@ import numpy as np
 
 
 class TorchDataset(Dataset):
-    def __init__(self, X, y=None, add_noise=False, noise_scale=0.5):
+    def __init__(self, X: torch.Tensor, y: Optional[torch.Tensor] = None, add_noise: bool = False,
+                 noise_scale: float = 0.5):
         self.X = X
         self.y = y
         self.add_noise = add_noise
         self.noise_scale = noise_scale
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.X)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int):
         if self.y is not None:
             if self.add_noise:
                 return self.X[idx] + self.noise_scale * np.random.normal(size=self.X.shape[1]), self.y[idx]
@@ -28,7 +31,8 @@ class TorchDataset(Dataset):
 
 
 class TorchDatasetRolling(Dataset):
-    def __init__(self, X, y=None, n=10, roll_y=False, add_noise=False, noise_scale=0.5):
+    def __init__(self, X: torch.Tensor, y: Optional[torch.Tensor] = None, n: int = 10, roll_y: bool = False,
+                 add_noise: bool = False, noise_scale: float = 0.5):
         self.X = X
         self.y = y
         self.n = n
@@ -36,10 +40,11 @@ class TorchDatasetRolling(Dataset):
         self.add_noise = add_noise
         self.noise_scale = noise_scale
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.X)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int):
+        # Build a left-aligned rolling window ending at idx.
         start = max(0, idx - self.n + 1)
         if self.y is not None:
             if self.roll_y:
@@ -67,11 +72,12 @@ class TorchDatasetRolling(Dataset):
             return self.X[start:idx + 1]
 
 
-def collate_pad_beginning(batch, pad_value=0.0, max_len=None):
+def collate_pad_beginning(batch, pad_value: float = 0.0, max_len: Optional[int] = None) -> tuple[torch.Tensor, torch.Tensor]:
     Xs, ys = zip(*batch)
     batch_size = len(Xs)
     max_m = max_len or max(x.shape[0] for x in Xs)
 
+    # Pad on the left so the most recent time steps stay aligned at the end.
     if len(Xs[0].shape) == 3:
         N, K = Xs[0].shape[1], Xs[0].shape[2]
         X_padded = torch.full((batch_size, max_m, N, K), pad_value)
@@ -200,13 +206,14 @@ def torch_to_np_features(d, n_rolling: int = 10):
     X_out = []
 
     for i in range(N):
-        # reorder stocks in a cyclical way
+        # Reorder stocks cyclically so each target series is seen first.
         X_reordered = torch.cat(
             [X[:, i:], X[:, :i]],
             dim=1
         )
         X_flat = X_reordered.reshape(T, -1)
 
+        # Concatenate lagged views of the reordered features.
         X_lagged = torch.cat(
             [shift_torch(X_flat, n=k) for k in range(n_rolling)],
             dim=1
@@ -223,7 +230,7 @@ def torch_to_np_features(d, n_rolling: int = 10):
     return X_np
 
 
-def generate_derangement(n):
+def generate_derangement(n: int) -> np.ndarray:
     rng = np.random.default_rng()
     while True:
         p = rng.permutation(n)
