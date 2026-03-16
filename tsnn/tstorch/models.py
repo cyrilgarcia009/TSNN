@@ -439,7 +439,7 @@ class CustomBiDimensionalTransformerSparse(nn.Module):
     def series_attention(self, x, attn_layer):
         B, T, N, D = x.shape
         x_flat = x.view(B * T, N, D)
-        out = attn_layer.self_attn(x_flat, x_flat, x_flat)
+        out = attn_layer(x_flat, sparsify=self.sparsify)
         out = out.view(B, T, N, D)
         return out
 

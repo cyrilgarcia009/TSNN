@@ -23,7 +23,8 @@ _attn_softmax = []
 
 
 def scaled_dot_product_attention(query, key, value, attn_mask=None, score_mod=None, dropout_p=0.0,
-                                 is_causal=False, scale=None, enable_gqa=False, sparsify=None) -> torch.Tensor:
+                                 is_causal=False, scale=None, enable_gqa=False, sparsify=None,
+                                 training=True) -> torch.Tensor:
     L, S = query.size(-2), key.size(-2)
     scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
     attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
@@ -65,7 +66,7 @@ def scaled_dot_product_attention(query, key, value, attn_mask=None, score_mod=No
         attn_weight += attn_bias
 
     attn_soft = torch.softmax(attn_weight, dim=-1)
-    attn_soft = torch.dropout(attn_soft, dropout_p, train=True)
+    attn_soft = torch.dropout(attn_soft, dropout_p, train=training)
 
     return attn_soft @ value, torch.softmax(attn_weight, dim=-1)
 
@@ -167,7 +168,15 @@ class MultiHeadAttention(nn.Module):
         # Step 3. Run SDPA
         # (N, nheads, L_t, E_head)
         attn_output, attn_weights = scaled_dot_product_attention(
-            query, key, value, dropout_p=self.dropout, is_causal=is_causal, attn_mask=attn_mask, sparsify=sparsify)
+            query,
+            key,
+            value,
+            dropout_p=self.dropout,
+            is_causal=is_causal,
+            attn_mask=attn_mask,
+            sparsify=sparsify,
+            training=self.training,
+        )
         # (N, nheads, L_t, E_head) -> (N, L_t, nheads, E_head) -> (N, L_t, E_total)
         attn_output = attn_output.transpose(1, 2).flatten(-2)
         self.last_attn_weights = attn_weights.detach()
