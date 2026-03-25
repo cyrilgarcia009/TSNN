@@ -27,24 +27,28 @@ def scaled_dot_product_attention(query: torch.Tensor, key: torch.Tensor, value: 
                                  enable_gqa: bool = False, sparsify=None, training: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
     L, S = query.size(-2), key.size(-2)
     scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
-    attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
-    if is_causal:
-        assert attn_mask is None
-        temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
-        attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-
-    if attn_mask is not None:
-        if attn_mask.dtype == torch.bool:
-            attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
-        else:
-            attn_bias = attn_mask + attn_bias
-
     if enable_gqa:
         key = key.repeat_interleave(query.size(-3) // key.size(-3), -3)
         value = value.repeat_interleave(query.size(-3) // value.size(-3), -3)
 
     attn_weight = query @ key.transpose(-2, -1) * scale_factor
-    attn_weight += attn_bias
+    if is_causal:
+        temp_mask = torch.ones(L, S, dtype=torch.bool, device=query.device).tril(diagonal=0)
+        attn_weight = attn_weight.masked_fill(temp_mask.logical_not(), float("-inf"))
+
+    if attn_mask is not None:
+        if attn_mask.dim() == 2:
+            attn_mask = attn_mask.unsqueeze(0).unsqueeze(0)
+        elif attn_mask.dim() == 3:
+            attn_mask = attn_mask.unsqueeze(1)
+        else:
+            while attn_mask.dim() < attn_weight.dim():
+                attn_mask = attn_mask.unsqueeze(0)
+        if attn_mask.dtype == torch.bool:
+            attn_weight = attn_weight.masked_fill(attn_mask.logical_not(), float("-inf"))
+        else:
+            attn_weight = attn_weight + attn_mask
+
     if score_mod is not None:
         attn_weight = score_mod(attn_weight)
 
@@ -57,13 +61,18 @@ def scaled_dot_product_attention(query: torch.Tensor, key: torch.Tensor, value: 
         new_attn_mask = new_attn_mask.bool()
         new_attn_mask = new_attn_mask.to(query.device)
 
-        attn_bias = torch.zeros(attn_weight.shape[1], L, S, dtype=query.dtype, device=query.device)
         if new_attn_mask is not None:
-            if new_attn_mask.dtype == torch.bool:
-                attn_bias.masked_fill_(new_attn_mask.logical_not(), float("-inf"))
+            if new_attn_mask.dim() == 2:
+                new_attn_mask = new_attn_mask.unsqueeze(0).unsqueeze(0)
+            elif new_attn_mask.dim() == 3:
+                new_attn_mask = new_attn_mask.unsqueeze(0)
             else:
-                attn_bias = new_attn_mask + attn_bias
-        attn_weight += attn_bias
+                while new_attn_mask.dim() < attn_weight.dim():
+                    new_attn_mask = new_attn_mask.unsqueeze(0)
+            if new_attn_mask.dtype == torch.bool:
+                attn_weight = attn_weight.masked_fill(new_attn_mask.logical_not(), float("-inf"))
+            else:
+                attn_weight = attn_weight + new_attn_mask
 
     attn_soft = torch.softmax(attn_weight, dim=-1)
     # Respect module train/eval mode so inference stays deterministic.

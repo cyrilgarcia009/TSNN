@@ -72,7 +72,7 @@ class TorchDatasetRolling(Dataset):
             return self.X[start:idx + 1]
 
 
-def collate_pad_beginning(batch, pad_value: float = 0.0, max_len: Optional[int] = None) -> tuple[torch.Tensor, torch.Tensor]:
+def collate_pad_beginning(batch, pad_value: float = 0.0, max_len: Optional[int] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     Xs, ys = zip(*batch)
     batch_size = len(Xs)
     max_m = max_len or max(x.shape[0] for x in Xs)
@@ -105,7 +105,7 @@ def collate_pad_beginning(batch, pad_value: float = 0.0, max_len: Optional[int] 
     else:
         y_padded = torch.stack(ys)
 
-    return X_padded, y_padded  # , mask
+    return X_padded, y_padded, mask
 
 
 def np_to_torch(X, y=None, train_test_split=True, train_pct=0.625, batch_size=256, shuffle=True, n_rolling=1,

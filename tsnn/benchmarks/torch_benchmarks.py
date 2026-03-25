@@ -29,6 +29,22 @@ class TorchWrapper:
         self.train_corr = []
         self.test_corr = []
 
+    def _forward_model(self, X, pad_mask=None):
+        if pad_mask is None:
+            return self.model(X)
+        return self.model(X, pad_mask=pad_mask)
+
+    def _masked_loss(self, pred, y, pad_mask=None):
+        if pad_mask is None or pred.ndim != 3 or y.ndim != 3:
+            return self.loss_fn(pred, y)
+        return self.loss_fn(pred[pad_mask], y[pad_mask])
+
+    def _masked_corr(self, pred, y, pad_mask=None):
+        if pad_mask is not None and pred.ndim == 3 and y.ndim == 3:
+            pred = pred[pad_mask]
+            y = y[pad_mask]
+        return np.corrcoef(pred.detach().flatten().to('cpu'), y.detach().flatten().to('cpu'))[0][1]
+
     def train_loop(self, dataloader):
         self.model.train()
         num_batches = len(dataloader)
@@ -36,16 +52,21 @@ class TorchWrapper:
         train_corr = 0
         accumulation_steps = 0
 
-        for batch, (X, y) in enumerate(dataloader):
+        for batch, data in enumerate(dataloader):
+            if len(data) == 3:
+                X, y, pad_mask = data
+                pad_mask = pad_mask.to(self.device)
+            else:
+                X, y = data
+                pad_mask = None
             X, y = X.to(self.device), y.to(self.device)
 
-            pred = self.model(X)
-            loss = self.loss_fn(pred, y)
+            pred = self._forward_model(X, pad_mask=pad_mask)
+            loss = self._masked_loss(pred, y, pad_mask=pad_mask)
             loss = loss / self.grad_accum_steps
 
             train_loss += loss.item() * self.grad_accum_steps
-            train_corr += (np.corrcoef(pred.detach().flatten().to('cpu'),
-                                       y.detach().flatten().to('cpu'))[0][1])
+            train_corr += self._masked_corr(pred, y, pad_mask=pad_mask)
 
             loss.backward()
 
@@ -66,11 +87,17 @@ class TorchWrapper:
         test_corr = 0
 
         with torch.no_grad():
-            for X, y in dataloader:
+            for data in dataloader:
+                if len(data) == 3:
+                    X, y, pad_mask = data
+                    pad_mask = pad_mask.to(self.device)
+                else:
+                    X, y = data
+                    pad_mask = None
                 X, y = X.to(self.device), y.to(self.device)
-                pred = self.model(X)
-                test_loss += self.loss_fn(pred, y).item()
-                test_corr += (np.corrcoef(pred.flatten().to('cpu'), y.flatten().to('cpu'))[0][1])
+                pred = self._forward_model(X, pad_mask=pad_mask)
+                test_loss += self._masked_loss(pred, y, pad_mask=pad_mask).item()
+                test_corr += self._masked_corr(pred, y, pad_mask=pad_mask)
 
         test_loss /= num_batches
         test_corr /= num_batches
@@ -115,10 +142,17 @@ class TorchWrapper:
 
         with torch.inference_mode():
             for batch in non_shuffled:
-                X = batch[0] if isinstance(batch, (list, tuple)) else batch
+                if isinstance(batch, (list, tuple)):
+                    X = batch[0]
+                    pad_mask = batch[2] if len(batch) == 3 else None
+                else:
+                    X = batch
+                    pad_mask = None
                 X = X.to(self.device, non_blocking=True)
+                if pad_mask is not None:
+                    pad_mask = pad_mask.to(self.device, non_blocking=True)
 
-                pred = self.model(X)
+                pred = self._forward_model(X, pad_mask=pad_mask)
                 preds.append(pred.detach().cpu())
         preds = torch.cat(preds, dim=0).numpy()
         # return preds.flatten()

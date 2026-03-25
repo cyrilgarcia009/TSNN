@@ -19,6 +19,32 @@ Succesive layers are specified by for instance layers="TCTC", where "T" and "C" 
 """
 
 
+def _build_temporal_attn_mask(base_mask, pad_mask: torch.Tensor, repeat_factor: int = 1) -> torch.Tensor:
+    """
+    Combines the causal mask with a batch padding mask.
+    Invalid query rows fall back to the identity so attention stays finite.
+    """
+    B, T = pad_mask.shape
+    device = pad_mask.device
+
+    if base_mask is None:
+        attn_mask = torch.ones(B, T, T, dtype=torch.bool, device=device)
+    else:
+        attn_mask = base_mask.to(device=device, dtype=torch.bool).unsqueeze(0).expand(B, -1, -1).clone()
+
+    key_mask = pad_mask[:, None, :].expand(B, T, T)
+    query_mask = pad_mask[:, :, None].expand(B, T, T)
+    attn_mask = attn_mask & key_mask
+
+    eye = torch.eye(T, dtype=torch.bool, device=device).unsqueeze(0)
+    attn_mask = torch.where(query_mask, attn_mask, eye)
+
+    if repeat_factor > 1:
+        attn_mask = attn_mask.repeat_interleave(repeat_factor, dim=0)
+
+    return attn_mask
+
+
 class GlobalMLP(nn.Module):
     def __init__(
             self,
@@ -46,7 +72,7 @@ class GlobalMLP(nn.Module):
 
         self.network = nn.Sequential(*layers)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor = None) -> torch.Tensor:
         """
         x: (B, T, N, F)
         """
@@ -110,7 +136,7 @@ class BiDimensionalMLP(nn.Module):
         mlp2_layers.append(nn.Linear(hidden_dim_mlp2, n_ts))
         self.mlp2 = nn.Sequential(*mlp2_layers)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor = None) -> torch.Tensor:
         """
         x: (B, T, N, F)
         """
@@ -217,7 +243,7 @@ class OneDimensionalTransformer(nn.Module):
                 nn.Linear(d_model, 1)
             )
 
-    def forward(self, x: torch.Tensor, mask=None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask=None, pad_mask: torch.Tensor = None) -> torch.Tensor:
         # x: (batch, n_rolling, n_ts, n_f)
         B, n_rolling, n_ts, n_f = x.shape
 
@@ -227,7 +253,11 @@ class OneDimensionalTransformer(nn.Module):
 
             x = self.input_proj(x) + self.pos_emb_time[:, :n_rolling, :]
 
-            x = self.encoder(x, mask=self.mask, sparsify=self.sparsify)
+            attn_mask = self.mask
+            if pad_mask is not None:
+                attn_mask = _build_temporal_attn_mask(self.mask, pad_mask)
+
+            x = self.encoder(x, mask=attn_mask, sparsify=self.sparsify)
 
             if self.roll_y == True:
                 return self.output_head(x)
@@ -323,15 +353,18 @@ class CustomBiDimensionalTransformer(nn.Module):
         out = out.view(B, T, N, D)
         return out
 
-    def temporal_attention(self, x: torch.Tensor, attn_encoder) -> torch.Tensor:
+    def temporal_attention(self, x: torch.Tensor, attn_encoder, pad_mask: torch.Tensor = None) -> torch.Tensor:
         """Temporal attention: attend over the T time dimension independently for each series"""
         B, T, N, D = x.shape
         x_flat = x.transpose(1, 2).contiguous().view(B * N, T, D)
-        out = attn_encoder(x_flat, mask=self.mask, sparsify=self.sparsify)
+        attn_mask = self.mask
+        if pad_mask is not None:
+            attn_mask = _build_temporal_attn_mask(self.mask, pad_mask, repeat_factor=N)
+        out = attn_encoder(x_flat, mask=attn_mask, sparsify=self.sparsify)
         out = out.view(B, N, T, D).transpose(1, 2)
         return out
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor = None) -> torch.Tensor:
         # x: (B, T, N, F)
         B, T, N, _ = x.shape
         x = self.input_proj(x)
@@ -352,7 +385,7 @@ class CustomBiDimensionalTransformer(nn.Module):
 
             if 'temporal' in block:
                 # Temporal block
-                x_att = self.temporal_attention(x, block['temporal'])
+                x_att = self.temporal_attention(x, block['temporal'], pad_mask=pad_mask)
                 x = block['norm'](res + self.dropout(x_att).contiguous())
 
             elif 'series' in block:
@@ -444,23 +477,29 @@ class CustomBiDimensionalTransformerSparse(nn.Module):
         out = out.view(B, T, N, D)
         return out
 
-    def temporal_attention(self, x: torch.Tensor, attn_encoder) -> torch.Tensor:
+    def temporal_attention(self, x: torch.Tensor, attn_encoder, pad_mask: torch.Tensor = None) -> torch.Tensor:
         B, T, N, D = x.shape
         # Attend over time independently for each series.
         x_flat = x.transpose(1, 2).contiguous().view(B * N, T, D)
-        out = attn_encoder(x_flat, mask=self.mask, sparsify=self.sparsify)
+        attn_mask = self.mask
+        if pad_mask is not None:
+            attn_mask = _build_temporal_attn_mask(self.mask, pad_mask, repeat_factor=N)
+        out = attn_encoder(x_flat, mask=attn_mask, sparsify=self.sparsify)
         out = out.view(B, N, T, D).transpose(1, 2)
         return out
 
-    def temporal_attention_l1_gated(self, x: torch.Tensor, attn_layer) -> tuple[torch.Tensor, torch.Tensor]:
+    def temporal_attention_l1_gated(self, x: torch.Tensor, attn_layer, pad_mask: torch.Tensor = None) -> tuple[torch.Tensor, torch.Tensor]:
         B, T, N, D = x.shape
         # Temporal sparse block also returns the gated lag coefficients.
         x_flat = x.transpose(1, 2).contiguous().view(B * N, T, D)
-        out, gated_coeffs = attn_layer(x_flat, attn_mask=self.mask, is_causal=True)
+        attn_mask = self.mask
+        if pad_mask is not None:
+            attn_mask = _build_temporal_attn_mask(self.mask, pad_mask, repeat_factor=N)
+        out, gated_coeffs = attn_layer(x_flat, attn_mask=attn_mask, is_causal=False)
         out = out.view(B, N, T, D).transpose(1, 2)
         return out, gated_coeffs
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor = None) -> torch.Tensor:
 
         B, T, N, _ = x.shape
         x = self.input_proj(x)
@@ -472,12 +511,12 @@ class CustomBiDimensionalTransformerSparse(nn.Module):
             res = x
 
             if 'temporal_l1_gated' in block:
-                x_att, gated_coeffs = self.temporal_attention_l1_gated(x, block['temporal_l1_gated'])
+                x_att, gated_coeffs = self.temporal_attention_l1_gated(x, block['temporal_l1_gated'], pad_mask=pad_mask)
                 x = block['norm'](res + self.dropout(x_att).contiguous())
                 self._last_gated_coeffs.append(gated_coeffs)
 
             elif 'temporal' in block:
-                x_att = self.temporal_attention(x, block['temporal'])
+                x_att = self.temporal_attention(x, block['temporal'], pad_mask=pad_mask)
                 x = block['norm'](res + self.dropout(x_att).contiguous())
 
             elif 'series' in block:
