@@ -16,9 +16,6 @@ The other direction is compressed at the start using either a simple linear laye
 
 iv) CustomBiDimensionalTransformer: Most general model to apply attention layers in both directions. 
 Succesive layers are specified by for instance layers="TCTC", where "T" and "C" represent respectively time-series and cross-sectional attention.
-
-v) JointSpatioTemporalTransformer: Applies attention directly on the flattened (time, series) grid so a query can
-attend to a specific source series at a specific lag in a single step.
 """
 
 
@@ -44,34 +41,6 @@ def _build_temporal_attn_mask(base_mask, pad_mask: torch.Tensor, repeat_factor: 
 
     if repeat_factor > 1:
         attn_mask = attn_mask.repeat_interleave(repeat_factor, dim=0)
-
-    return attn_mask
-
-
-def _build_joint_time_mask(n_rolling: int, n_ts: int, device=None) -> torch.Tensor:
-    """Causal mask on the flattened (time, series) grid."""
-    time_index = torch.arange(n_rolling, device=device).repeat_interleave(n_ts)
-    return time_index[:, None] >= time_index[None, :]
-
-
-def _build_spatiotemporal_attn_mask(base_mask: torch.Tensor, pad_mask: torch.Tensor, n_ts: int) -> torch.Tensor:
-    """
-    Extends the causal time mask to the flattened (time, series) grid.
-    Invalid query rows fall back to the identity so attention stays finite.
-    """
-    B, T = pad_mask.shape
-    device = pad_mask.device
-    L = T * n_ts
-
-    attn_mask = base_mask.to(device=device, dtype=torch.bool).unsqueeze(0).expand(B, -1, -1).clone()
-    token_mask = pad_mask.repeat_interleave(n_ts, dim=1)
-
-    key_mask = token_mask[:, None, :].expand(B, L, L)
-    query_mask = token_mask[:, :, None].expand(B, L, L)
-    attn_mask = attn_mask & key_mask
-
-    eye = torch.eye(L, dtype=torch.bool, device=device).unsqueeze(0)
-    attn_mask = torch.where(query_mask, attn_mask, eye)
 
     return attn_mask
 
@@ -426,80 +395,6 @@ class CustomBiDimensionalTransformer(nn.Module):
 
         if not self.roll_y:
             x = x[:, -1, :, :]  # Take last time step for forecasting
-
-        return self.output_head(x).squeeze(-1)
-
-
-class JointSpatioTemporalTransformer(nn.Module):
-    def __init__(
-            self,
-            n_ts,
-            n_f,
-            n_rolling,
-            d_model=128,
-            nhead=8,
-            num_layers=2,
-            dim_feedforward=512,
-            dropout=0.2,
-            sparsify=None,
-            roll_y=False,
-            embeddings="both",
-    ):
-        super().__init__()
-        self.n_ts = n_ts
-        self.n_rolling = n_rolling
-        self.roll_y = roll_y
-        self.sparsify = sparsify
-        self.embeddings = embeddings
-
-        self.input_proj = nn.Linear(n_f, d_model)
-        self.pos_emb_time = nn.Parameter(torch.randn(1, n_rolling, d_model))
-        self.pos_emb_series = nn.Parameter(torch.randn(1, n_ts, d_model))
-
-        encoder_layer = transformers.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-        )
-        self.encoder = transformers.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.register_buffer(
-            "joint_time_mask",
-            _build_joint_time_mask(n_rolling, n_ts),
-            persistent=False,
-        )
-
-        self.output_head = nn.Sequential(
-            nn.LayerNorm(d_model),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_model, 1)
-        )
-
-    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor = None) -> torch.Tensor:
-        # x: (B, T, N, F)
-        B, T, N, _ = x.shape
-        x = self.input_proj(x)
-
-        if self.embeddings == "both":
-            x = x + self.pos_emb_time[:, :T, None, :] + self.pos_emb_series[:, None, :N, :]
-        elif self.embeddings == "C":
-            x = x + self.pos_emb_series[:, None, :N, :]
-        elif self.embeddings == "T":
-            x = x + self.pos_emb_time[:, :T, None, :]
-
-        # Flatten the (time, series) grid so attention can target a specific lag/source-series pair.
-        x = x.reshape(B, T * N, -1)
-
-        attn_mask = self.joint_time_mask
-        if pad_mask is not None:
-            attn_mask = _build_spatiotemporal_attn_mask(self.joint_time_mask, pad_mask, N)
-
-        x = self.encoder(x, mask=attn_mask, sparsify=self.sparsify)
-        x = x.view(B, T, N, -1)
-
-        if not self.roll_y:
-            x = x[:, -1, :, :]
 
         return self.output_head(x).squeeze(-1)
 
