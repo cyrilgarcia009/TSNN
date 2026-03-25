@@ -3,24 +3,6 @@ from tsnn.tstorch import transformers
 import torch
 import copy
 
-"""
-File contains four models:
-
-i) GlobalMLP: Trivial MLP model without any structure, flattens N,F,T into input_dim = n_rolling * n_ts * n_f then applies an MLP.
-
-ii) BiDimensionalMLP: Applies succesively an MLP along a first direction then an MLP along the second. 
-The parameter first_direction specifies which dimension to treat first.
-
-iii) OneDimensionalTransformer: Applies num_layers of attention in one direction specified by the parameter attn_direction. 
-The other direction is compressed at the start using either a simple linear layer or an MLP.
-
-iv) CustomBiDimensionalTransformer: Most general model to apply attention layers in both directions. 
-Succesive layers are specified by for instance layers="TCTC", where "T" and "C" represent respectively time-series and cross-sectional attention.
-
-v) JointSpatioTemporalTransformer: Applies attention directly on the flattened (time, series) grid so a query can
-attend to a specific source series at a specific lag in a single step.
-"""
-
 
 def _build_temporal_attn_mask(base_mask, pad_mask: torch.Tensor, repeat_factor: int = 1) -> torch.Tensor:
     """
@@ -56,7 +38,7 @@ def _build_joint_time_mask(n_rolling: int, n_ts: int, device=None) -> torch.Tens
 
 def _build_spatiotemporal_attn_mask(base_mask: torch.Tensor, pad_mask: torch.Tensor, n_ts: int) -> torch.Tensor:
     """
-    Extends the causal time mask to the flattened (time, series) grid.
+    Extends the temporal padding mask to the flattened (time, series) grid.
     Invalid query rows fall back to the identity so attention stays finite.
     """
     B, T = pad_mask.shape
@@ -77,6 +59,8 @@ def _build_spatiotemporal_attn_mask(base_mask: torch.Tensor, pad_mask: torch.Ten
 
 
 class GlobalMLP(nn.Module):
+    """Plain MLP baseline on the full flattened rolling window."""
+
     def __init__(
             self,
             n_ts,  # N
@@ -114,6 +98,8 @@ class GlobalMLP(nn.Module):
 
 
 class BiDimensionalMLP(nn.Module):
+    """Two-stage MLP baseline that processes one axis and then the other."""
+
     def __init__(
             self,
             n_ts,  # N
@@ -197,6 +183,8 @@ class BiDimensionalMLP(nn.Module):
 
 
 class OneDimensionalTransformer(nn.Module):
+    """Transformer applied along a single axis after compressing the other axis."""
+
     def __init__(
             self,
             n_ts,
@@ -309,6 +297,8 @@ class OneDimensionalTransformer(nn.Module):
 
 
 class CustomBiDimensionalTransformer(nn.Module):
+    """Alternating temporal and cross-sectional transformer blocks, e.g. TCTC."""
+
     def __init__(
             self,
             n_ts,
@@ -431,6 +421,8 @@ class CustomBiDimensionalTransformer(nn.Module):
 
 
 class JointSpatioTemporalTransformer(nn.Module):
+    """Attention on the flattened (time, series) grid in a single joint block."""
+
     def __init__(
             self,
             n_ts,
@@ -488,7 +480,7 @@ class JointSpatioTemporalTransformer(nn.Module):
         elif self.embeddings == "T":
             x = x + self.pos_emb_time[:, :T, None, :]
 
-        # Flatten the (time, series) grid so attention can target a specific lag/source-series pair.
+        # Flatten the (time, series) grid so attention can target a lag/source-series pair directly.
         x = x.reshape(B, T * N, -1)
 
         attn_mask = self.joint_time_mask
@@ -504,11 +496,238 @@ class JointSpatioTemporalTransformer(nn.Module):
         return self.output_head(x).squeeze(-1)
 
 
+class FeaturewiseStaticRoutingBiDimensionalModel(nn.Module):
+    """Featurewise static lag and series routing before late feature aggregation."""
+
+    def __init__(
+            self,
+            n_ts,
+            n_f,
+            n_rolling,
+            d_model=64,
+            dropout=0.1,
+            roll_y=False,
+            temperature=0.1,
+    ):
+        super().__init__()
+        self.n_ts = n_ts
+        self.n_f = n_f
+        self.n_rolling = n_rolling
+        self.roll_y = roll_y
+        self.temperature = temperature
+
+        self.dropout = nn.Dropout(dropout)
+
+        # Each feature gets its own lag kernel so feature-specific shifts can coexist.
+        self.lag_logits = nn.Parameter(torch.zeros(n_f, n_rolling))
+        self.series_logits = nn.Parameter(torch.zeros(n_f, n_ts, n_ts))
+        self.register_buffer(
+            "time_causal_mask",
+            torch.tril(torch.ones(n_rolling, n_rolling, dtype=torch.bool)),
+            persistent=False,
+        )
+
+        self.output_head = nn.Sequential(
+            # Keep raw feature amplitudes available to the aggregator.
+            nn.Linear(n_f, d_model),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model, 1)
+        )
+
+    def _time_weights(self, pad_mask: torch.Tensor = None) -> torch.Tensor:
+        """
+        Build one stationary causal lag kernel per feature.
+        This lets one feature prefer lag 1 while another prefers lag 10.
+        """
+        lag_scores = torch.softmax(self.lag_logits[:, :self.n_rolling] / self.temperature, dim=-1)
+        T = pad_mask.shape[1] if pad_mask is not None else self.n_rolling
+        lag_scores = lag_scores[:, :T]
+
+        time_idx = torch.arange(T, device=lag_scores.device)
+        lag_idx = time_idx[:, None] - time_idx[None, :]
+
+        base_weights = torch.zeros(self.n_f, T, T, device=lag_scores.device, dtype=lag_scores.dtype)
+        valid = lag_idx >= 0
+        base_weights[:, valid] = lag_scores[:, lag_idx[valid]]
+        base_weights = base_weights / base_weights.sum(dim=-1, keepdim=True).clamp_min(1e-8)
+
+        if pad_mask is None:
+            return base_weights
+
+        B = pad_mask.shape[0]
+        valid_mask = _build_temporal_attn_mask(self.time_causal_mask[:T, :T], pad_mask)
+        weights = base_weights.unsqueeze(0).expand(B, -1, -1, -1).clone()
+        weights = weights * valid_mask[:, None, :, :].to(dtype=weights.dtype)
+        weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-8)
+        return weights
+
+    def _series_weights(self) -> torch.Tensor:
+        logits = self.series_logits / self.temperature
+        return torch.softmax(logits, dim=-1)
+
+    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor = None) -> torch.Tensor:
+        # x: (B, T, N, F)
+        time_weights = self._time_weights(pad_mask=pad_mask)
+        if time_weights.dim() == 3:
+            x = torch.einsum('fts,bsnf->btnf', time_weights, x)
+        else:
+            x = torch.einsum('bfts,bsnf->btnf', time_weights, x)
+
+        series_weights = self._series_weights()
+        x = torch.einsum('fnm,btmf->btnf', series_weights, x)
+        x = self.dropout(x)
+
+        if not self.roll_y:
+            x = x[:, -1, :, :]
+
+        return self.output_head(x).squeeze(-1)
+
+
+class RoutingBiasedBiDimensionalTransformer(nn.Module):
+    """T/C transformer with learned static routing biases added to attention scores."""
+
+    def __init__(
+            self,
+            n_ts,
+            n_f,
+            n_rolling,
+            mask,
+            d_model=128,
+            nhead=8,
+            layers="TCTC",
+            dim_feedforward=512,
+            dropout=0.2,
+            sparsify=None,
+            roll_y=False,
+            embeddings="both",
+            temperature=1.0,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.n_ts = n_ts
+        self.n_rolling = n_rolling
+        self.mask = mask
+        self.sparsify = sparsify
+        self.roll_y = roll_y
+        self.layers = layers
+        self.embeddings = embeddings
+        self.temperature = temperature
+
+        self.input_proj = nn.Linear(n_f, d_model)
+        self.pos_emb_time = nn.Parameter(torch.randn(1, n_rolling, d_model))
+        self.pos_emb_series = nn.Parameter(torch.randn(1, n_ts, d_model))
+        self.dropout = nn.Dropout(dropout)
+
+        self.blocks = nn.ModuleList()
+        self.temporal_biases = nn.ParameterList()
+        self.series_biases = nn.ParameterList()
+        for symbol in layers:
+            if symbol == 'T':
+                temporal_encoder = transformers.TransformerEncoder(
+                    transformers.TransformerEncoderLayer(
+                        d_model, nhead, dim_feedforward, dropout
+                    ),
+                    num_layers=1
+                )
+                self.blocks.append(nn.ModuleDict({
+                    'temporal': temporal_encoder,
+                    'norm': nn.LayerNorm(d_model),
+                }))
+                self.temporal_biases.append(nn.Parameter(torch.zeros(n_rolling)))
+            elif symbol == 'C':
+                series_encoder = transformers.TransformerEncoder(
+                    transformers.TransformerEncoderLayer(
+                        d_model, nhead, dim_feedforward, dropout
+                    ),
+                    num_layers=1
+                )
+                self.blocks.append(nn.ModuleDict({
+                    'series': series_encoder,
+                    'norm': nn.LayerNorm(d_model),
+                }))
+                self.series_biases.append(nn.Parameter(torch.zeros(n_ts, n_ts)))
+            else:
+                raise ValueError(f"Invalid character in layers string: '{symbol}'. Only 'T' and 'C' are allowed.")
+
+        self.output_head = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model, 1)
+        )
+
+    def _temporal_bias_mask(self, T: int, pad_mask: torch.Tensor = None, bias_index: int = 0) -> torch.Tensor:
+        lag_logits = self.temporal_biases[bias_index][:T] / self.temperature
+        time_idx = torch.arange(T, device=lag_logits.device)
+        lag_idx = time_idx[:, None] - time_idx[None, :]
+
+        attn_bias = torch.full((T, T), float("-inf"), device=lag_logits.device)
+        valid = lag_idx >= 0
+        attn_bias[valid] = lag_logits[lag_idx[valid]]
+
+        if pad_mask is None:
+            return attn_bias
+
+        B = pad_mask.shape[0]
+        attn_bias = attn_bias.unsqueeze(0).expand(B, -1, -1).clone()
+        valid_mask = _build_temporal_attn_mask(self.mask, pad_mask)
+        attn_bias = attn_bias.masked_fill(valid_mask.logical_not(), float("-inf"))
+        return attn_bias
+
+    def _series_bias_mask(self, N: int, bias_index: int = 0) -> torch.Tensor:
+        return self.series_biases[bias_index][:N, :N] / self.temperature
+
+    def series_attention(self, x: torch.Tensor, attn_encoder, bias_index: int = 0) -> torch.Tensor:
+        B, T, N, D = x.shape
+        x_flat = x.view(B * T, N, D)
+        attn_mask = self._series_bias_mask(N, bias_index=bias_index)
+        out = attn_encoder(x_flat, mask=attn_mask, sparsify=self.sparsify)
+        return out.view(B, T, N, D)
+
+    def temporal_attention(self, x: torch.Tensor, attn_encoder, pad_mask: torch.Tensor = None, bias_index: int = 0) -> torch.Tensor:
+        B, T, N, D = x.shape
+        x_flat = x.transpose(1, 2).contiguous().view(B * N, T, D)
+        attn_mask = self._temporal_bias_mask(T, pad_mask=pad_mask, bias_index=bias_index)
+        if pad_mask is not None:
+            attn_mask = attn_mask.repeat_interleave(N, dim=0)
+        out = attn_encoder(x_flat, mask=attn_mask, sparsify=self.sparsify)
+        return out.view(B, N, T, D).transpose(1, 2)
+
+    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor = None) -> torch.Tensor:
+        # x: (B, T, N, F)
+        B, T, N, F = x.shape
+        x = self.input_proj(x)
+
+        if self.embeddings == "both":
+            x = x + self.pos_emb_time[:, :T, None, :] + self.pos_emb_series[:, None, :N, :]
+        elif self.embeddings == "C":
+            x = x + self.pos_emb_series[:, None, :N, :]
+        elif self.embeddings == "T":
+            x = x + self.pos_emb_time[:, :T, None, :]
+
+        temporal_bias_idx = 0
+        series_bias_idx = 0
+        for block in self.blocks:
+            if 'temporal' in block:
+                res = x
+                x_att = self.temporal_attention(x, block['temporal'], pad_mask=pad_mask, bias_index=temporal_bias_idx)
+                x = block['norm'](res + self.dropout(x_att).contiguous())
+                temporal_bias_idx += 1
+            elif 'series' in block:
+                res = x
+                x_att = self.series_attention(x, block['series'], bias_index=series_bias_idx)
+                x = block['norm'](res + self.dropout(x_att).contiguous())
+                series_bias_idx += 1
+
+        if not self.roll_y:
+            x = x[:, -1, :, :]
+
+        return self.output_head(x).squeeze(-1)
+
+
 class CustomBiDimensionalTransformerSparse(nn.Module):
-    """
-    CustomBiDimensionalTransformer with L1-sparse diagonal-gated temporal attention.
-    Uses diagonal-gated coefficients for temporal (T) direction with L1 penalization.
-    """
+    """T/C transformer with diagonal-gated sparse temporal attention."""
 
     def __init__(
             self,
