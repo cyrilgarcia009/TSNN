@@ -22,9 +22,61 @@ _attn_weights = []
 _attn_softmax = []
 
 
+def _stabilize_attention_logits(attn_weight: torch.Tensor) -> torch.Tensor:
+    """
+    Ensure every attention row has at least one finite logit before softmax.
+    Fully masked rows otherwise become all -inf and produce NaNs.
+    """
+    finite_mask = torch.isfinite(attn_weight)
+    valid_row = finite_mask.any(dim=-1, keepdim=True)
+    if valid_row.all():
+        return attn_weight
+
+    fallback = torch.zeros_like(attn_weight)
+    if attn_weight.size(-1) == attn_weight.size(-2):
+        eye = torch.eye(attn_weight.size(-1), dtype=torch.bool, device=attn_weight.device)
+        while eye.dim() < attn_weight.dim():
+            eye = eye.unsqueeze(0)
+        fallback = fallback.masked_fill(~eye, float("-inf"))
+
+    return torch.where(valid_row, attn_weight, fallback)
+
+
+def entmax15_bisect(logits: torch.Tensor, dim: int = -1, n_iter: int = 20) -> torch.Tensor:
+    """
+    Entmax with alpha=1.5 computed by bisection.
+    Produces sparse probabilities while keeping a gradient path for suppressed entries.
+    """
+    logits = logits - logits.max(dim=dim, keepdim=True).values
+    tau_lo = 0.5 * logits.min(dim=dim, keepdim=True).values - 1.0
+    tau_hi = 0.5 * logits.max(dim=dim, keepdim=True).values
+
+    for _ in range(n_iter):
+        tau_mid = (tau_lo + tau_hi) / 2.0
+        probs = torch.clamp(0.5 * logits - tau_mid, min=0.0) ** 2
+        probs_sum = probs.sum(dim=dim, keepdim=True)
+        tau_lo = torch.where(probs_sum > 1.0, tau_mid, tau_lo)
+        tau_hi = torch.where(probs_sum <= 1.0, tau_mid, tau_hi)
+
+    probs = torch.clamp(0.5 * logits - tau_hi, min=0.0) ** 2
+    probs = probs / probs.sum(dim=dim, keepdim=True).clamp_min(1e-12)
+    return torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def _normalize_attention(attn_weight: torch.Tensor, normalizer: str = "softmax") -> torch.Tensor:
+    if normalizer == "softmax":
+        probs = torch.softmax(attn_weight, dim=-1)
+    elif normalizer == "entmax15":
+        probs = entmax15_bisect(attn_weight, dim=-1)
+    else:
+        raise ValueError(f"Unknown attention normalizer: {normalizer}")
+    return torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+
+
 def scaled_dot_product_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, attn_mask=None,
                                  score_mod=None, dropout_p: float = 0.0, is_causal: bool = False, scale=None,
-                                 enable_gqa: bool = False, sparsify=None, training: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
+                                 enable_gqa: bool = False, sparsify=None, training: bool = True,
+                                 normalizer: str = "softmax") -> tuple[torch.Tensor, torch.Tensor]:
     L, S = query.size(-2), key.size(-2)
     scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
     if enable_gqa:
@@ -54,7 +106,8 @@ def scaled_dot_product_attention(query: torch.Tensor, key: torch.Tensor, value: 
 
     # sparsify the softmax attention matrix
     if sparsify is not None:
-        attn_soft = torch.softmax(attn_weight, dim=-1)
+        attn_weight = _stabilize_attention_logits(attn_weight)
+        attn_soft = _normalize_attention(attn_weight, normalizer=normalizer)
         avg_proba = torch.mean(attn_soft, dim=0)
 
         new_attn_mask = sparsify(avg_proba)
@@ -74,11 +127,12 @@ def scaled_dot_product_attention(query: torch.Tensor, key: torch.Tensor, value: 
             else:
                 attn_weight = attn_weight + new_attn_mask
 
-    attn_soft = torch.softmax(attn_weight, dim=-1)
+    attn_weight = _stabilize_attention_logits(attn_weight)
+    attn_soft = _normalize_attention(attn_weight, normalizer=normalizer)
     # Respect module train/eval mode so inference stays deterministic.
     attn_soft = torch.dropout(attn_soft, dropout_p, train=training)
 
-    return attn_soft @ value, torch.softmax(attn_weight, dim=-1)
+    return attn_soft @ value, attn_soft
 
 
 class MultiHeadAttention(nn.Module):
@@ -107,11 +161,13 @@ class MultiHeadAttention(nn.Module):
             bias=True,
             device=None,
             dtype=None,
-            sparsify=None
+            sparsify=None,
+            attn_normalizer: str = "softmax",
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.sparsify = sparsify
+        self.attn_normalizer = attn_normalizer
         self.nheads = nheads
         self.dropout = dropout
         self._qkv_same_embed_dim = E_q == E_k and E_q == E_v
@@ -186,6 +242,7 @@ class MultiHeadAttention(nn.Module):
             attn_mask=attn_mask,
             sparsify=sparsify,
             training=self.training,
+            normalizer=self.attn_normalizer,
         )
         # (N, nheads, L_t, E_head) -> (N, L_t, nheads, E_head) -> (N, L_t, E_total)
         attn_output = attn_output.transpose(1, 2).flatten(-2)
@@ -273,7 +330,8 @@ class TransformerEncoderLayer(nn.Module):
             norm_first=True,
             bias=True,
             device=None,
-            dtype=None
+            dtype=None,
+            attn_normalizer: str = "softmax",
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -285,6 +343,7 @@ class TransformerEncoderLayer(nn.Module):
             nhead,
             dropout=dropout,
             bias=bias,
+            attn_normalizer=attn_normalizer,
             **factory_kwargs,
         )
         self.linear1 = nn.Linear(d_model, dim_feedforward, bias=bias, **factory_kwargs)

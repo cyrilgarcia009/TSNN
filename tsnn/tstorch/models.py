@@ -97,6 +97,57 @@ class GlobalMLP(nn.Module):
         return out
 
 
+class GlobalLSTM(nn.Module):
+    """Global LSTM over flattened panel features across time, predicting all series."""
+
+    def __init__(
+            self,
+            n_ts,
+            n_f,
+            n_rolling,
+            hidden_dim=128,
+            num_layers=2,
+            dropout=0.1,
+    ):
+        super().__init__()
+        self.n_ts = n_ts
+        input_dim = n_ts * n_f
+        lstm_dropout = dropout if num_layers > 1 else 0.0
+
+        self.encoder = nn.LSTM(
+            input_size=input_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            dropout=lstm_dropout,
+            batch_first=True,
+        )
+        self.dropout = nn.Dropout(dropout)
+        self.output = nn.Linear(hidden_dim, n_ts)
+
+    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor = None) -> torch.Tensor:
+        """
+        x: (B, T, N, F)
+        """
+        B, T, N, F = x.shape
+        x = x.reshape(B, T, N * F)
+
+        if pad_mask is not None:
+            lengths = pad_mask.sum(dim=1).clamp(min=1).to("cpu")
+            packed = nn.utils.rnn.pack_padded_sequence(
+                x,
+                lengths,
+                batch_first=True,
+                enforce_sorted=False,
+            )
+            _, (hidden, _) = self.encoder(packed)
+            last_hidden = hidden[-1]
+        else:
+            _, (hidden, _) = self.encoder(x)
+            last_hidden = hidden[-1]
+
+        return self.output(self.dropout(last_hidden))
+
+
 class BiDimensionalMLP(nn.Module):
     """Two-stage MLP baseline that processes one axis and then the other."""
 
@@ -313,6 +364,7 @@ class CustomBiDimensionalTransformer(nn.Module):
             sparsify=None,
             roll_y=False,
             embeddings="both",
+            attn_normalizer="softmax",
     ):
         super().__init__()
         self.d_model = d_model
@@ -337,7 +389,7 @@ class CustomBiDimensionalTransformer(nn.Module):
             if symbol == 'T':
                 temporal_encoder = transformers.TransformerEncoder(
                     transformers.TransformerEncoderLayer(
-                        d_model, nhead, dim_feedforward, dropout
+                        d_model, nhead, dim_feedforward, dropout, attn_normalizer=attn_normalizer
                     ),
                     num_layers=1
                 )
@@ -348,7 +400,7 @@ class CustomBiDimensionalTransformer(nn.Module):
             elif symbol == 'C':
                 series_encoder = transformers.TransformerEncoder(
                     transformers.TransformerEncoderLayer(
-                        d_model, nhead, dim_feedforward, dropout
+                        d_model, nhead, dim_feedforward, dropout, attn_normalizer=attn_normalizer
                     ),
                     num_layers=1
                 )
@@ -418,6 +470,73 @@ class CustomBiDimensionalTransformer(nn.Module):
             x = x[:, -1, :, :]  # Take last time step for forecasting
 
         return self.output_head(x).squeeze(-1)
+
+
+class MinimalDoubleShiftTransformer(nn.Module):
+    """One temporal block per series, then one cross-sectional block at the final time."""
+
+    def __init__(
+            self,
+            n_ts,
+            n_f,
+            n_rolling,
+            d_model=32,
+            nhead=4,
+            dim_feedforward=64,
+            dropout=0.0,
+            roll_y=False,
+    ):
+        super().__init__()
+        self.n_ts = n_ts
+        self.n_f = n_f
+        self.n_rolling = n_rolling
+        self.roll_y = roll_y
+        self.d_model = d_model
+
+        self.input_proj = nn.Linear(n_f, d_model)
+        self.pos_emb_time = nn.Parameter(torch.randn(1, n_rolling, d_model) * 0.02)
+        self.pos_emb_series = nn.Parameter(torch.randn(1, n_ts, d_model) * 0.02)
+
+        self.temporal_block = transformers.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation=torch.nn.functional.gelu,
+            norm_first=False,
+        )
+        self.cross_block = transformers.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation=torch.nn.functional.gelu,
+            norm_first=False,
+        )
+        self.output_head = nn.Linear(d_model, 1)
+
+    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor = None) -> torch.Tensor:
+        # x: (B, T, N, F)
+        B, T, N, _ = x.shape
+        h = self.input_proj(x)
+        h = h + self.pos_emb_time[:, :T, None, :] + self.pos_emb_series[:, None, :N, :]
+
+        h_temp = h.permute(0, 2, 1, 3).contiguous().view(B * N, T, self.d_model)
+        temporal_mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=x.device))
+        if pad_mask is not None:
+            temporal_mask = _build_temporal_attn_mask(temporal_mask, pad_mask, repeat_factor=N)
+        h_temp = self.temporal_block(h_temp, attn_mask=temporal_mask)
+        h_temp = h_temp.view(B, N, T, self.d_model).permute(0, 2, 1, 3).contiguous()
+
+        if self.roll_y:
+            cross_input = h_temp.view(B * T, N, self.d_model)
+            cross_out = self.cross_block(cross_input)
+            cross_out = cross_out.view(B, T, N, self.d_model)
+            return self.output_head(cross_out).squeeze(-1)
+
+        h_last = h_temp[:, -1, :, :]
+        h_cross = self.cross_block(h_last)
+        return self.output_head(h_cross).squeeze(-1)
 
 
 class JointSpatioTemporalTransformer(nn.Module):
@@ -705,6 +824,71 @@ class RoutingBiasedBiDimensionalTransformer(nn.Module):
             x = x + self.pos_emb_series[:, None, :N, :]
         elif self.embeddings == "T":
             x = x + self.pos_emb_time[:, :T, None, :]
+
+        temporal_bias_idx = 0
+        series_bias_idx = 0
+        for block in self.blocks:
+            if 'temporal' in block:
+                res = x
+                x_att = self.temporal_attention(x, block['temporal'], pad_mask=pad_mask, bias_index=temporal_bias_idx)
+                x = block['norm'](res + self.dropout(x_att).contiguous())
+                temporal_bias_idx += 1
+            elif 'series' in block:
+                res = x
+                x_att = self.series_attention(x, block['series'], bias_index=series_bias_idx)
+                x = block['norm'](res + self.dropout(x_att).contiguous())
+                series_bias_idx += 1
+
+        if not self.roll_y:
+            x = x[:, -1, :, :]
+
+        return self.output_head(x).squeeze(-1)
+
+
+class RelativeTemporalAbsoluteCSBiDimensionalTransformer(RoutingBiasedBiDimensionalTransformer):
+    """Same TCTC stack, but time is purely relative while CS keeps absolute identity plus B."""
+
+    def __init__(
+            self,
+            n_ts,
+            n_f,
+            n_rolling,
+            mask,
+            d_model=128,
+            nhead=8,
+            layers="TCTC",
+            dim_feedforward=512,
+            dropout=0.2,
+            sparsify=None,
+            roll_y=False,
+            temperature=1.0,
+            use_series_embeddings=True,
+    ):
+        super().__init__(
+            n_ts=n_ts,
+            n_f=n_f,
+            n_rolling=n_rolling,
+            mask=mask,
+            d_model=d_model,
+            nhead=nhead,
+            layers=layers,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            sparsify=sparsify,
+            roll_y=roll_y,
+            embeddings="C",
+            temperature=temperature,
+        )
+        self.use_series_embeddings = use_series_embeddings
+
+    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor = None) -> torch.Tensor:
+        # x: (B, T, N, F)
+        B, T, N, F = x.shape
+        x = self.input_proj(x)
+
+        # Temporal structure comes only from relative lag biases; series keep absolute identities.
+        if self.use_series_embeddings:
+            x = x + self.pos_emb_series[:, None, :N, :]
 
         temporal_bias_idx = 0
         series_bias_idx = 0

@@ -19,7 +19,7 @@ class Generator:
         self.corr_with_y = None
         self.ys = {'true': torch.empty(0), 'optimal': torch.empty(0), 'linear': torch.empty(0),
                    'conditional': torch.empty(0), 'shift': torch.empty(0), 'seasonal': torch.empty(0),
-                   'cs': torch.empty(0), 'cs_shift': torch.empty(0)}
+                   'cs': torch.empty(0), 'cs_shift': torch.empty(0), 'cs_shift_dense': torch.empty(0)}
         self.y_pred_optimal = None
         self.y_linear = None
         self.y_conditional = None
@@ -27,6 +27,7 @@ class Generator:
         self.y_seasonal = None
         self.y_cs = None
         self.y_cs_shift = None
+        self.y_cs_shift_dense = None
         self.dataloader = None
         self.is_transposed = False
 
@@ -245,6 +246,7 @@ class Generator:
         self.y_seasonal = np.zeros((self.T, self.n_ts))
         self.y_cs = np.zeros((self.T, self.n_ts))
         self.y_cs_shift = np.zeros((self.T, self.n_ts))
+        self.y_cs_shift_dense = np.zeros((self.T, self.n_ts))
         self.y_conditional_ts = np.zeros((self.T, self.n_ts))
         self.y_conditional_cs = np.zeros((self.T, self.n_ts))
 
@@ -352,6 +354,22 @@ class Generator:
                 self.y_pred_optimal += optimal_pred
                 self.y_cs_shift += optimal_pred
 
+            elif fea == "TSCS_dense":
+                if random_ts_shift > 1:
+                    n_shift = np.random.randint(1, random_ts_shift)
+                else:
+                    n_shift = 1
+
+                lagged = np.concatenate((X[ind][:n_shift] * 0, X[ind][:-n_shift]))
+                dense_matrix = np.random.normal(size=(self.n_ts, self.n_ts))
+                dense_matrix /= np.sqrt(self.n_ts)
+                # Enforce pure cross-series predictability: no self-series leakage on the diagonal.
+                np.fill_diagonal(dense_matrix, 0.0)
+                optimal_pred = lagged @ dense_matrix.T
+                optimal_pred = optimal_pred * coeff
+                self.y_pred_optimal += optimal_pred
+                self.y_cs_shift_dense += optimal_pred
+
             elif fea == "fea_cond":
                 valid_indices = np.delete(np.arange(self.n_f), ind)
                 ind2 = np.random.choice(valid_indices)
@@ -428,6 +446,7 @@ class Generator:
         self.ys['conditional_cs'] = torch.from_numpy(self.y_conditional_cs).to(dtype=torch.float32)
         self.ys['cs'] = torch.from_numpy(self.y_cs).to(dtype=torch.float32)
         self.ys['cs_shift'] = torch.from_numpy(self.y_cs_shift).to(dtype=torch.float32)
+        self.ys['cs_shift_dense'] = torch.from_numpy(self.y_cs_shift_dense).to(dtype=torch.float32)
         self.ys['true'] = torch.from_numpy(y).to(dtype=torch.float32)
 
     def get_dataloader(self, n_rolling=1, narrow=False, train_test_split=True, shuffle=True, batch_size=256,
