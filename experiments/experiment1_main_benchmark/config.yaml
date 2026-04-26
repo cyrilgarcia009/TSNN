@@ -1,0 +1,101 @@
+# Experiment 1 — Main Effect Benchmark
+# Edit this file to change what gets run. run.py reads it at startup.
+
+# ---------------------------------------------------------------------------
+# Data dimensions
+# ---------------------------------------------------------------------------
+data:
+  T: 4000          # total time steps
+  n_ts: 10         # number of time series (panel width)
+  n_f: 5           # number of input features per series
+  n_rolling: 10    # look-back window / T_win
+  train_pct: 0.625 # fraction of T used for training (rest = test)
+  batch_size: 256
+  shuffle_cs: true # random derangement for CS effects (vs circular shift)
+
+# ---------------------------------------------------------------------------
+# Effects to test
+# Each entry must be a valid list_type_effects value in the generator,
+# or the special value "superposition" (handled separately in run.py).
+# Comment out any line to exclude that effect.
+# ---------------------------------------------------------------------------
+effects:
+  - lin
+  - TS_shift
+  - CS_shift
+  - fea_cond
+  - TSCS_shift
+  - TS_cond
+  - CS_cond
+  - superposition   # all effects combined (one feature per effect type)
+
+# ---------------------------------------------------------------------------
+# Signal-to-noise ratios (rho = global_corr in the generator)
+# ---------------------------------------------------------------------------
+rho_values:
+  - 0.02
+  - 0.05
+  - 0.10
+  - 0.20
+  - 0.50
+
+# ---------------------------------------------------------------------------
+# Random seeds — one full run per seed; results averaged across seeds
+# ---------------------------------------------------------------------------
+seeds:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+
+# ---------------------------------------------------------------------------
+# Models to include — comment out any line to disable
+# ---------------------------------------------------------------------------
+models:
+  - TheoC      # analytical OLS bound (linear effect only; NaN otherwise)
+  - Lasso      # global LassoCV on flattened rolling windows
+  - MLP        # global MLP on flattened rolling windows
+  - GlobalLSTM
+  - TCTC
+  - TFT
+  - TiDE
+  - NBEATSx
+
+# ---------------------------------------------------------------------------
+# Training protocol for PyTorch models (TCTC, GlobalLSTM)
+# ---------------------------------------------------------------------------
+training:
+  val_pct: 0.2            # fraction of training split used for val / early stopping
+  val_warmup_epochs: 5    # min epochs before early stopping kicks in
+  early_stopping_patience: 30
+  # Epoch budget scales with rho: lower SNR needs more gradient steps
+  epochs_by_rho:
+    0.02: 300
+    0.05: 200
+    0.10: 150
+    0.20: 100
+    0.50:  60
+
+# ---------------------------------------------------------------------------
+# NeuralForecast settings (TFT, TiDE, NBEATSx)
+# ---------------------------------------------------------------------------
+neuralforecast:
+  max_steps: 300
+  val_check_steps: 50
+  learning_rate: 0.001
+  test_eval_steps: 300    # max steps of the test rollout (None = full test set)
+  val_pct: 0.2
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+output:
+  results_dir: results          # relative to this config file's directory
+  raw_file: raw_results.csv     # all per-seed rows
+  summary_file: summary.csv     # mean ± std aggregated across seeds
