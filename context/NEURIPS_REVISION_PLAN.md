@@ -350,27 +350,27 @@ It is implemented and directly addresses the gradient-flow criticism. Recommenda
 
 ### PHASE A — Repo & Infrastructure (Day 1–2)
 
-**A1. Repo cleanup**
-- [ ] Add `.gitignore` covering: `__pycache__/`, `*.pyc`, `.ipynb_checkpoints/`, `*.csv` result files, macOS `.DS_Store`, AWS credentials
-- [ ] Archive old notebooks into `notebooks/archive/`; only `updated_figures_for_paper.ipynb` remains active
-- [ ] Remove stray root-level files: `Test file`, `all_effects_test_30.csv`
-- [ ] Untrack already-tracked `__pycache__` directories from git (`git rm -r --cached`)
+**A1. Repo cleanup** ✅
+- [x] Add `.gitignore` covering: `__pycache__/`, `*.pyc`, `.ipynb_checkpoints/`, `*.csv` result files, macOS `.DS_Store`, AWS credentials
+- [x] Archive old notebooks into `notebooks/archive/`; only `updated_figures_for_paper.ipynb` remains active
+- [x] Remove stray root-level files: `Test file`, `all_effects_test_30.csv`
+- [x] Untrack already-tracked `__pycache__` directories from git (`git rm -r --cached`)
 
-**A2. Cross-platform compatibility**
-- [ ] The notebook already has correct device auto-detection (`cuda → mps → cpu`) — verify the same pattern is used in `TorchWrapper` default (currently hardcoded `device='mps'`)
-- [ ] Verify `ml_benchmarks.GlobalVARBenchmark` exists and works on both platforms
-- [ ] Check for any other hardcoded device references in the codebase
+**A2. Cross-platform compatibility** ✅
+- [x] Fix `TorchWrapper` default `device='mps'` → auto-detect `cuda → mps → cpu` (committed b8dd9a2)
+- [x] Verify `ml_benchmarks.GlobalVARBenchmark` exists and works on both platforms (pure sklearn/numpy — confirmed at line 311)
+- [x] No other hardcoded device references found (`grep -rn "device" tsnn/` only found the one fixed above)
 
-**A3. Reproducibility**
-- [ ] Create `requirements.txt` (or `environment.yml`) pinning: torch, numpy, scikit-learn, pandas, tqdm, matplotlib, neuralforecast, datasetsforecast, notebook versions
-- [ ] Add README section: "Setup" with instructions for AWS (CUDA) and MacBook (MPS)
-- [ ] Document that `notebooks/results/` should be in `.gitignore` (large CSV/parquet files) but a `results/README.md` should explain how to reproduce them
+**A3. Reproducibility** ✅
+- [x] `requirements.txt` and `environment.yml` created with pinned versions; includes neuralforecast and datasetsforecast
+- [x] README updated with Setup section for AWS (CUDA) and MacBook (MPS), plus repo layout and reproduction instructions
+- [x] `notebooks/results/` is git-ignored (already in `.gitignore` as `notebooks/results/`)
 
-**A4. Code review & bug fixes**
-- [ ] **Generator:** Verify `generate_dataset_gr_simple()` normalizes `y_pred_optimal` correctly — the `fea_cond` effect introduces a product term (`X[i] * sign(X[j])`) whose variance is not simply `coeff²`; confirm the `active_norm` L2 rescaling still gives the right global_corr
-- [ ] **Sparse attention:** Read `tsnn/tstorch/transformers.py` — document whether `−∞` is `float('-inf')` or a large constant, and whether entmax15 is already wired in; confirm the `attn_normalizer` parameter path works end-to-end
-- [ ] **Model hyperparameters:** The paper reports d_model=64, nhead=8 — the notebook uses d_model=50, nhead=1. Both will need to be reported accurately in the paper; make sure there is no confusion
-- [ ] **`GlobalVARBenchmark`:** Confirm this class exists in `tsnn/benchmarks/ml_benchmarks.py`
+**A4. Code review & bug fixes** ✅
+- [x] **Generator:** `fea_cond` normalization is correct — `X[i] * sign(X[j])` has Var = Var(X[i]) = 1 (since sign(X[j]) ∈ ±1 independent); the `active_norm` L2 rescaling gives the right global_corr ✓
+- [x] **Sparse attention:** masking uses `float("-inf")` (Python literal); entmax15 is wired via `attn_normalizer` parameter, implemented as pure-torch bisection in `transformers.py:45` — no external `entmax` package needed ✓
+- [x] **Model hyperparameters:** paper reports d_model=64, nhead=8; notebook uses d_model=50, nhead=1. This will be reconciled in Phase E (paper update) — code is fine
+- [x] **`GlobalVARBenchmark`:** confirmed at `ml_benchmarks.py:311` ✓
 
 ---
 
