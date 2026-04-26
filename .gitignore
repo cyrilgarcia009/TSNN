@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Results & data (large files, reproduced from scripts)
+notebooks/results/
+results/
+*.csv
+*.parquet
+data/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# AWS / credentials
+.env
+*.pem
+*.key
+credentials
+.aws/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Distribution / packaging
+*.so
+*.dylib
