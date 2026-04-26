@@ -32,6 +32,9 @@ data/
 credentials
 .aws/
 
+# ICML review screenshots
+context/ICML_reviews/*.png
+
 # IDEs
 .vscode/
 .idea/
