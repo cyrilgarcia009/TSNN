@@ -402,10 +402,14 @@ def _causal_mask(seq_len, device):
     return q[:, None] >= k[None, :]
 
 
-def build_tctc(n_ts, n_f, n_rolling):
+# All CustomBiDimensionalTransformer variants — model name IS the layers string.
+TC_VARIANTS = {"TC", "CT", "TT", "CC", "TCTC", "CTCT", "TCTCTC", "TCTCTCTC"}
+
+
+def build_tc_variant(layers_str, n_ts, n_f, n_rolling):
     mask = _causal_mask(n_rolling, DEVICE)
     return models.CustomBiDimensionalTransformer(
-        n_ts, n_f, n_rolling, mask=mask, layers="TCTC",
+        n_ts, n_f, n_rolling, mask=mask, layers=layers_str,
         nhead=1, dropout=0.0,
         d_model=n_ts * n_f, dim_feedforward=n_ts * n_f * 2,
         sparsify=None, roll_y=True, embeddings="both",
@@ -599,9 +603,10 @@ def main():
                                 roll_y=False,
                             )
 
-                        elif model_name == "TCTC":
+                        elif model_name in TC_VARIANTS:
+                            _layers = model_name  # capture for lambda closure
                             metrics = run_torch_model(
-                                lambda: build_tctc(n_ts, n_f, n_rolling),
+                                lambda layers=_layers: build_tc_variant(layers, n_ts, n_f, n_rolling),
                                 X, y, y_opt, n_rolling, batch_size, train_pct,
                                 epochs=epochs,
                                 val_pct=train_cfg["val_pct"],

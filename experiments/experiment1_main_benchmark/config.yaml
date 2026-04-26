@@ -12,7 +12,7 @@ data:
   train_pct: 0.625 # fraction of T used for training (rest = test)
   batch_size: 256
   shuffle_cs: true  # random derangement for CS effects (vs circular shift)
-  max_ts_lag: 10    # TS/TSCS lag drawn uniformly from [1, max_ts_lag]; set to 1 for fixed lag=1
+  max_ts_lag: 9     # TS/TSCS lag drawn uniformly from [1, max_ts_lag]; must be ≤ n_rolling-1=9 so the lag stays inside the look-back window
 
 # ---------------------------------------------------------------------------
 # Effects to test
@@ -63,7 +63,16 @@ models:
   - Lasso      # global LassoCV on flattened rolling windows
   - MLP        # global MLP on flattened rolling windows
   - GlobalLSTM
-  - TCTC
+  # --- CustomBiDimensionalTransformer variants (model name = layers string) ---
+  - TC         # 1 temporal + 1 cross-sectional block
+  - CT         # 1 cross-sectional + 1 temporal block
+  - TT         # 2 temporal blocks only
+  - CC         # 2 cross-sectional blocks only
+  - TCTC       # 2 alternating pairs (paper baseline)
+  - CTCT       # 2 alternating pairs, CS-first
+  - TCTCTC     # 3 alternating pairs (TC^3)
+  - TCTCTCTC   # 4 alternating pairs (TC^4)
+  # --- NeuralForecast baselines ---
   - TFT
   - TiDE
   - NBEATSx

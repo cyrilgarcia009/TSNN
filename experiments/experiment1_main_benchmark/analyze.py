@@ -32,7 +32,11 @@ _FIGURES = _RESULTS / "figures"
 _LATEX = _RESULTS / "latex"
 
 # Canonical model order for display
-MODEL_ORDER = ["TheoC", "Lasso", "MLP", "GlobalLSTM", "TCTC", "TFT", "TiDE", "NBEATSx"]
+MODEL_ORDER = [
+    "TheoC", "Lasso", "MLP", "GlobalLSTM",
+    "TC", "CT", "TT", "CC", "TCTC", "CTCT", "TCTCTC", "TCTCTCTC",
+    "TFT", "TiDE", "NBEATSx",
+]
 
 # Canonical effect order for display
 EFFECT_ORDER = ["lin", "TS_shift", "CS_shift", "fea_cond", "TSCS_shift", "TS_cond", "CS_cond", "superposition"]
@@ -49,30 +53,63 @@ EFFECT_LABELS = {
 }
 
 MODEL_LABELS = {
-    "TheoC":     "TheoC",
-    "Lasso":     "Lasso",
-    "MLP":       "MLP",
+    "TheoC":      "TheoC",
+    "Lasso":      "Lasso",
+    "MLP":        "MLP",
     "GlobalLSTM": "LSTM",
-    "TCTC":      "TCTC",
-    "TFT":       "TFT",
-    "TiDE":      "TiDE",
-    "NBEATSx":   "NBEATSx",
+    # TC variants
+    "TC":         "TC",
+    "CT":         "CT",
+    "TT":         "TT",
+    "CC":         "CC",
+    "TCTC":       "TCTC",
+    "CTCT":       "CTCT",
+    "TCTCTC":     "TC³",
+    "TCTCTCTC":   "TC⁴",
+    # NeuralForecast
+    "TFT":        "TFT",
+    "TiDE":       "TiDE",
+    "NBEATSx":    "NBEATSx",
 }
 
 MODEL_COLORS = {
-    "TheoC":     "#888888",
-    "Lasso":     "#e41a1c",
-    "MLP":       "#ff7f00",
+    "TheoC":      "#888888",
+    "Lasso":      "#e41a1c",
+    "MLP":        "#ff7f00",
     "GlobalLSTM": "#984ea3",
-    "TCTC":      "#377eb8",
-    "TFT":       "#4daf4a",
-    "TiDE":      "#a65628",
-    "NBEATSx":   "#f781bf",
+    # TC variants — blue family, depth-graded
+    "TC":         "#c6dbef",
+    "CT":         "#9ecae1",
+    "TT":         "#6baed6",
+    "CC":         "#4292c6",
+    "TCTC":       "#2171b5",
+    "CTCT":       "#08519c",
+    "TCTCTC":     "#08306b",
+    "TCTCTCTC":   "#041a40",
+    # NeuralForecast
+    "TFT":        "#4daf4a",
+    "TiDE":       "#a65628",
+    "NBEATSx":    "#f781bf",
 }
 
 MODEL_MARKERS = {
-    "TheoC": "s", "Lasso": "^", "MLP": "D", "GlobalLSTM": "v",
-    "TCTC": "o", "TFT": "P", "TiDE": "X", "NBEATSx": "*",
+    "TheoC":      "s",
+    "Lasso":      "^",
+    "MLP":        "D",
+    "GlobalLSTM": "v",
+    # TC variants
+    "TC":         "<",
+    "CT":         ">",
+    "TT":         "p",
+    "CC":         "h",
+    "TCTC":       "o",
+    "CTCT":       "H",
+    "TCTCTC":     "8",
+    "TCTCTCTC":   "*",
+    # NeuralForecast
+    "TFT":        "P",
+    "TiDE":       "X",
+    "NBEATSx":    "+",
 }
 
 
@@ -234,7 +271,8 @@ def plot_epoch_sufficiency(df, out_dir=None):
         print("No epoch_pct_used column found — skipping epoch sufficiency plot.")
         return
 
-    torch_models = [m for m in ["TCTC", "GlobalLSTM"] if m in df["model"].unique()]
+    _tc_variants = ["TC", "CT", "TT", "CC", "TCTC", "CTCT", "TCTCTC", "TCTCTCTC"]
+    torch_models = [m for m in (["GlobalLSTM"] + _tc_variants) if m in df["model"].unique()]
     if not torch_models:
         return
 

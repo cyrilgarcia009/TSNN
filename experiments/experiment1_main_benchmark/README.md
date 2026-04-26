@@ -14,7 +14,7 @@ Results feed directly into the paper's main result tables and figures.
 | F (features per series) | 5 | All 5 active (equal weight) |
 | Look-back window (T_win) | 10 | |
 | Train / Val / Test | 50% / 12.5% / 37.5% | Val carved from training split (val_pct=0.2) |
-| TS lag | Random ∈ [1, 10] | Drawn independently per feature and seed |
+| TS lag | Random ∈ [1, 9] | Drawn per feature and seed; capped at T_win−1=9 so the lag is always inside the look-back window |
 | CS shift | Random derangement | Different permutation each seed (`shuffle_cs=true`) |
 
 ### Effects (8)
@@ -30,7 +30,7 @@ Results feed directly into the paper's main result tables and figures.
 | `CS_cond` | 2 | Cross-sectional shift × nonlinear conditioning |
 | `superposition` | mixed | All 5 effect types simultaneously (one per feature) |
 
-### Models (8)
+### Models (15)
 
 | Model | Type | Key hyperparameters |
 |-------|------|---------------------|
@@ -38,10 +38,36 @@ Results feed directly into the paper's main result tables and figures.
 | Lasso | Classical | Global LassoCV (cv=5) on flattened rolling windows |
 | MLP | Classical | Global sklearn MLPRegressor (128→64) on flattened windows |
 | GlobalLSTM | Deep | 2 layers, hidden=128, dropout=0.1 |
-| TCTC | Deep | d_model=50, nhead=1, FF=100, dropout=0.0, layers=TCTC |
+| TC, CT, TT, CC | Deep | `CustomBiDimensionalTransformer`, 2 blocks — see table below |
+| TCTC, CTCT | Deep | `CustomBiDimensionalTransformer`, 4 blocks — see table below |
+| TCTCTC (TC³) | Deep | `CustomBiDimensionalTransformer`, 6 blocks — see table below |
+| TCTCTCTC (TC⁴) | Deep | `CustomBiDimensionalTransformer`, 8 blocks — see table below |
 | TFT | Deep | hidden=64, n_head=4, dropout=0.1, max_steps=300 |
 | TiDE | Deep | hidden=256, dropout=0.1, max_steps=300 |
 | NBEATSx | Deep | 3× identity stacks, MLP 256→256, max_steps=300 |
+
+#### CustomBiDimensionalTransformer variants
+
+The model name is the block sequence: `T` = temporal attention (over time, per series), `C` = cross-sectional attention (over series, per time step). All variants share the same per-block hyperparameters; only depth varies.
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| `d_model` | 50 | `n_ts × n_f = 10 × 5`; scales with data dimensions |
+| `nhead` | 1 | Single attention head (head dim = 50) |
+| `dim_feedforward` | 100 | `2 × d_model` |
+| `dropout` | 0.0 | No dropout |
+| `embeddings` | `"both"` | Learnable temporal + cross-sectional positional embeddings |
+| `roll_y` | `True` | Loss computed at every time step, not just the last |
+| Optimizer | AdamW | lr=1e-3, β=(0.9, 0.995), wd=1e-4 |
+
+Parameter counts per variant (each additional block pair adds ~41K params):
+
+| Variant | Blocks | Params |
+|---------|--------|--------|
+| TC / CT / TT / CC | 2 | ~43K |
+| TCTC / CTCT | 4 | ~84K |
+| TCTCTC (TC³) | 6 | ~125K |
+| TCTCTCTC (TC⁴) | 8 | ~167K |
 
 ### Training protocol
 
@@ -55,7 +81,7 @@ Results feed directly into the paper's main result tables and figures.
 | Seeds | 10 (0–9) → mean ± std reported |
 | ρ values | 0.02, 0.05, 0.10, 0.20, 0.50 |
 
-> **Note on the current run (seed 0–9, fixed lag=1):** The first full run was launched with `max_ts_lag=1` (fixed lag). From the next run onward the default is `max_ts_lag=10` (random lag ∈ [1, 10]).
+> **Note on `max_ts_lag`:** Must satisfy `max_ts_lag ≤ n_rolling − 1` so that the largest lag is always inside the model's look-back window. With `n_rolling=10` the ceiling is 9, which is the current default.
 
 ---
 
