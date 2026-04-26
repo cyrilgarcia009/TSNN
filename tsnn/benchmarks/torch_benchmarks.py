@@ -11,16 +11,22 @@ from .. import utils
 
 
 class TorchWrapper:
-    def __init__(self, model, optimizer, loss_fn=nn.MSELoss(), device='mps', grad_accum_steps=1, scheduler=None):
+    def __init__(self, model, optimizer, loss_fn=nn.MSELoss(), device=None, grad_accum_steps=1, scheduler=None):
         """
         Wrapper class around any pytorch custom model to standardize fit and predict steps
         :param model: pytorch model
         :param optimizer: pytorch optimizer
         :param loss_fn: loss function to sue with the model
-        :param device: cpu, cuda or mps
+        :param device: cpu, cuda or mps; auto-detected if None
         :param grad_accum_steps: for large models, enables to avoid memory errors by accumulating the gradients
         :param scheduler: optional pytorch scheduler stepped once per epoch after train/test loops
         """
+        if device is None:
+            device = (
+                'cuda' if torch.cuda.is_available()
+                else 'mps' if torch.backends.mps.is_available()
+                else 'cpu'
+            )
         self.device = device
         self.model = model
         self.loss_fn = loss_fn

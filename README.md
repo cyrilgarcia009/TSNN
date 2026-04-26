@@ -1,8 +1,55 @@
-# Time-series forecasting using transformers.
+# Time-series forecasting using transformers
 
-In this repo we test the effectiveness of transformer models for the problem of multi-dimensional time-series forecasting, in the setting where the signal to noise ratio is small. The setup is to predict a Y series of dimensions (time_steps, n_var) from an X of dimensions (time_steps, n_var, n_fea). The attention mechanism will be implemented both in the time-series and in the cross-sectional (given by the n_var variables) directions. We test our models on synthetic noisy data, including simple examples of linear / nonlinear relationships and conditionings, in both the time series and cross-sectional dimensions. We compare the predictive power of the model to the simple benchmarks of linear and Lasso regresions, boosting, and of simple neural networks architectures.
+We benchmark transformer models for multi-dimensional time-series forecasting under low signal-to-noise ratios. The prediction target is a panel `Y` of shape `(T, N)` from covariates `X` of shape `(T, N, F)`. We implement two-way (temporal + cross-sectional) attention and a dynamic max-sparsity mechanism, then evaluate against classical and neural baselines on synthetic data with known ground truth.
 
 Our paper: [arXiv:2602.09869](https://arxiv.org/abs/2602.09869).
+
+## Setup
+
+### Conda (recommended)
+
+```bash
+conda env create -f environment.yml
+conda activate tsnn
+pip install -e .
+```
+
+**GPU (CUDA 12, AWS):** after creating the env, replace the CPU torch with the CUDA wheel:
+
+```bash
+conda activate tsnn
+conda remove pytorch torchvision cpuonly --force
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+```
+
+**macOS (MPS):** the default PyTorch wheel ships with MPS support — no extra steps needed.
+
+### pip (alternative)
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+```
+
+For GPU on AWS, replace the `torch` install with the CUDA wheel as above.
+
+## Reproducing experiments
+
+All results are produced by `notebooks/updated_figures_for_paper.ipynb`.
+Set the `device` variable at the top of the notebook, or let it auto-detect (`cuda → mps → cpu`).
+
+Result CSVs are written to `notebooks/results/` (git-ignored; regenerate locally).
+
+## Repository layout
+
+```
+tsnn/               # Python package (generators, benchmarks, models)
+notebooks/
+  updated_figures_for_paper.ipynb  # main experiment notebook
+  archive/                         # old/exploratory notebooks
+context/            # planning documents and AI reviews (not shipped)
+```
 
 ## Contributors
 
