@@ -217,6 +217,72 @@ def plot_heatmap_table(df, rho, metric="test_corr_optimal", out_dir=None):
 
 
 # ---------------------------------------------------------------------------
+# Epoch sufficiency: did models converge before hitting the epoch budget?
+# ---------------------------------------------------------------------------
+
+def plot_epoch_sufficiency(df, out_dir=None):
+    """Heatmap of mean best_epoch / max_epochs (epoch_pct_used) per effect × rho.
+
+    Values close to 1.0 mean the model hit the epoch budget — may need more.
+    Values well below 1.0 mean early stopping triggered comfortably.
+    Only plotted for models that have best_epoch recorded (TCTC, GlobalLSTM).
+    """
+    out_dir = out_dir or _FIGURES
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if "epoch_pct_used" not in df.columns:
+        print("No epoch_pct_used column found — skipping epoch sufficiency plot.")
+        return
+
+    torch_models = [m for m in ["TCTC", "GlobalLSTM"] if m in df["model"].unique()]
+    if not torch_models:
+        return
+
+    effects = [e for e in EFFECT_ORDER if e in df["effect"].unique()]
+    rhos = sorted(df["rho"].unique())
+
+    fig, axes = plt.subplots(1, len(torch_models),
+                             figsize=(6 * len(torch_models), max(3, len(effects) * 0.6)),
+                             squeeze=False)
+    fig.suptitle("Epoch budget usage  (best_epoch / max_epochs)\n"
+                 "→ 1.0 means budget may be too tight", fontsize=11)
+
+    for col_idx, model_name in enumerate(torch_models):
+        ax = axes[0][col_idx]
+        sub = df[df["model"] == model_name]
+        pivot = (
+            sub.groupby(["effect", "rho"])["epoch_pct_used"]
+            .mean()
+            .unstack("rho")
+            .reindex(index=effects, columns=rhos)
+        )
+        pivot.index = [EFFECT_LABELS.get(e, e) for e in pivot.index]
+
+        im = ax.imshow(pivot.values, cmap="RdYlGn_r", vmin=0.0, vmax=1.0, aspect="auto")
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        ax.set_xticks(range(len(rhos)))
+        ax.set_xticklabels([f"ρ={r}" for r in rhos], rotation=30, ha="right", fontsize=8)
+        ax.set_yticks(range(len(pivot.index)))
+        ax.set_yticklabels(pivot.index, fontsize=9)
+        ax.set_title(MODEL_LABELS.get(model_name, model_name), fontsize=11)
+
+        for i in range(len(pivot.index)):
+            for j in range(len(rhos)):
+                val = pivot.values[i, j]
+                if not np.isnan(val):
+                    color = "white" if val > 0.75 else "black"
+                    ax.text(j, i, f"{val:.2f}", ha="center", va="center",
+                            fontsize=8, color=color)
+
+    plt.tight_layout()
+    out_path = out_dir / "epoch_sufficiency.pdf"
+    fig.savefig(out_path, bbox_inches="tight")
+    fig.savefig(str(out_path).replace(".pdf", ".png"), bbox_inches="tight", dpi=150)
+    plt.close(fig)
+    print(f"Saved: {out_path}")
+
+
+# ---------------------------------------------------------------------------
 # LaTeX table: mean (std) across seeds, bold = best per row
 # ---------------------------------------------------------------------------
 
@@ -309,6 +375,7 @@ def main():
         plot_performance_vs_rho(df, metric=metric)
         for rho in sorted(df["rho"].unique()):
             plot_heatmap_table(df, rho=rho, metric=metric)
+        plot_epoch_sufficiency(df)
 
     if not args.no_latex:
         _LATEX.mkdir(parents=True, exist_ok=True)

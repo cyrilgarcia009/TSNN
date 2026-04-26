@@ -387,7 +387,13 @@ def run_torch_model(model_builder, X, y, y_opt, n_rolling, batch_size,
         val_warmup_epochs=val_warmup_epochs,
         early_stopping_patience=early_stopping_patience,
     )
-    return _torch_metrics(wrapper, train_loader, test_loader, y_opt, DEVICE)
+    metrics = _torch_metrics(wrapper, train_loader, test_loader, y_opt, DEVICE)
+    # best_epoch is 0-indexed; store as 1-indexed for readability.
+    best_epoch = wrapper.best_epoch
+    metrics["best_epoch"] = (best_epoch + 1) if best_epoch is not None else None
+    metrics["max_epochs"] = epochs
+    metrics["epoch_pct_used"] = ((best_epoch + 1) / epochs) if best_epoch is not None else None
+    return metrics
 
 
 def _causal_mask(seq_len, device):
