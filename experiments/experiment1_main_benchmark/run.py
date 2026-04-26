@@ -76,8 +76,12 @@ def _default_corr_split(n_f):
     return [1 / np.sqrt(n_f)] * n_f
 
 
-def generate_dataset(effect, T, n_ts, n_f, rho, seed, shuffle_cs=True):
-    """Generate (X, y, y_opt, generator) for a given effect and SNR."""
+def generate_dataset(effect, T, n_ts, n_f, rho, seed, shuffle_cs=True, max_ts_lag=10):
+    """Generate (X, y, y_opt, generator) for a given effect and SNR.
+
+    max_ts_lag: TS/TSCS lags are drawn uniformly from [1, max_ts_lag] inclusive.
+                Set to 1 for a fixed lag of 1 (old behaviour).
+    """
     np.random.seed(seed)
     torch.manual_seed(seed)
 
@@ -88,13 +92,17 @@ def generate_dataset(effect, T, n_ts, n_f, rho, seed, shuffle_cs=True):
     else:
         effect_list = [effect] * n_f
 
+    # Generator uses randint(1, random_ts_shift) — exclusive upper bound —
+    # so pass max_ts_lag + 1 to get lags uniformly in [1, max_ts_lag].
+    random_ts_shift = max_ts_lag + 1 if max_ts_lag > 1 else 1
+
     z = generators.Generator(T, n_ts, n_f)
     z.generate_dataset_gr_simple(
         global_corr=rho,
         correl_split_by_fea=_default_corr_split(n_f),
         list_type_effects=effect_list,
         list_type_interaction=["cond"],
-        random_ts_shift=1,
+        random_ts_shift=random_ts_shift,
         shuffle_cs=shuffle_cs,
     )
     return z.X, z.y, z.ys["optimal"], z
@@ -515,6 +523,7 @@ def main():
     train_pct = data_cfg["train_pct"]
     batch_size = data_cfg["batch_size"]
     shuffle_cs = data_cfg["shuffle_cs"]
+    max_ts_lag = data_cfg.get("max_ts_lag", n_rolling)
 
     total = len(effects) * len(rhos) * len(seeds)
     print(f"Device: {DEVICE}")
@@ -548,7 +557,8 @@ def main():
                 # Generate dataset once per (effect, rho, seed)
                 try:
                     X, y, y_opt, gen_obj = generate_dataset(
-                        effect, T, n_ts, n_f, rho, seed, shuffle_cs=shuffle_cs,
+                        effect, T, n_ts, n_f, rho, seed,
+                        shuffle_cs=shuffle_cs, max_ts_lag=max_ts_lag,
                     )
                 except Exception as e:
                     tqdm.write(f"  [ERROR] generate_dataset({effect}, rho={rho}, seed={seed}): {e}")

@@ -11,7 +11,8 @@ data:
   n_rolling: 10    # look-back window / T_win
   train_pct: 0.625 # fraction of T used for training (rest = test)
   batch_size: 256
-  shuffle_cs: true # random derangement for CS effects (vs circular shift)
+  shuffle_cs: true  # random derangement for CS effects (vs circular shift)
+  max_ts_lag: 10    # TS/TSCS lag drawn uniformly from [1, max_ts_lag]; set to 1 for fixed lag=1
 
 # ---------------------------------------------------------------------------
 # Effects to test
