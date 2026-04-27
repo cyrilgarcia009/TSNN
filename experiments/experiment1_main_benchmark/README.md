@@ -77,7 +77,7 @@ Parameter counts per variant (each additional block pair adds ~41K params):
 | Val early stopping metric | Correlation to actual target |
 | Val warmup | 5 epochs before early stopping activates |
 | Early stopping patience | 30 epochs |
-| Epoch budget by ρ | ρ=0.02→300, 0.05→200, 0.10→150, 0.20→100, 0.50→60 |
+| Epoch budget by ρ | ρ=0.02→200, 0.05→150, 0.10→100, 0.20→70, 0.50→40 |
 | Seeds | 10 (0–9) → mean ± std reported |
 | ρ values | 0.02, 0.05, 0.10, 0.20, 0.50 |
 

@@ -16,7 +16,7 @@ build/
 # Results & data (large files, reproduced from scripts)
 notebooks/results/
 results/
-experiments/*/results/
+experiments/*/results*/
 *.csv
 *.parquet
 data/

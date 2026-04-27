@@ -1,0 +1,98 @@
+# Experiment 1 — Smoke Test Config
+# Runs a small subset to verify all models (including NeuralForecast) work
+# correctly and that new features (epoch tracking, TC variants, etc.) produce
+# sensible output before launching the full grid.
+#
+# Usage:
+#   python experiments/experiment1_main_benchmark/run.py --config experiments/experiment1_main_benchmark/config_smoke.yaml
+#
+# Results go to results_smoke/ (separate from the main results/).
+
+# ---------------------------------------------------------------------------
+# Data dimensions — identical to the full run
+# ---------------------------------------------------------------------------
+data:
+  T: 4000
+  n_ts: 10
+  n_f: 5
+  n_rolling: 10
+  train_pct: 0.625
+  batch_size: 256
+  shuffle_cs: true
+  max_ts_lag: 9
+
+# ---------------------------------------------------------------------------
+# All 8 effects, single rho value
+# ---------------------------------------------------------------------------
+effects:
+  - lin
+  - TS_shift
+  - CS_shift
+  - fea_cond
+  - TSCS_shift
+  - TS_cond
+  - CS_cond
+  - superposition
+
+rho_values:
+  - 0.20
+
+# ---------------------------------------------------------------------------
+# 3 seeds instead of 10
+# ---------------------------------------------------------------------------
+seeds:
+  - 0
+  - 1
+  - 2
+
+# ---------------------------------------------------------------------------
+# All 15 models — smoke test covers the full model list
+# ---------------------------------------------------------------------------
+models:
+  - TheoC
+  - Lasso
+  - MLP
+  - GlobalLSTM
+  - TC
+  - CT
+  - TT
+  - CC
+  - TCTC
+  - CTCT
+  - TCTCTC
+  - TCTCTCTC
+  - TFT
+  - TiDE
+  - NBEATSx
+
+# ---------------------------------------------------------------------------
+# Training protocol — same as full run
+# ---------------------------------------------------------------------------
+training:
+  val_pct: 0.2
+  val_warmup_epochs: 5
+  early_stopping_patience: 30
+  epochs_by_rho:
+    0.02: 200
+    0.05: 150
+    0.10: 100
+    0.20:  70
+    0.50:  40
+
+# ---------------------------------------------------------------------------
+# NeuralForecast settings — same as full run
+# ---------------------------------------------------------------------------
+neuralforecast:
+  max_steps: 300
+  val_check_steps: 50
+  learning_rate: 0.001
+  test_eval_steps: 300
+  val_pct: 0.2
+
+# ---------------------------------------------------------------------------
+# Output — separate directory so smoke results never touch raw_results.csv
+# ---------------------------------------------------------------------------
+output:
+  results_dir: results_smoke
+  raw_file: raw_results.csv
+  summary_file: summary.csv

@@ -86,11 +86,11 @@ training:
   early_stopping_patience: 30
   # Epoch budget scales with rho: lower SNR needs more gradient steps
   epochs_by_rho:
-    0.02: 300
-    0.05: 200
-    0.10: 150
-    0.20: 100
-    0.50:  60
+    0.02: 200
+    0.05: 150
+    0.10: 100
+    0.20:  70
+    0.50:  40
 
 # ---------------------------------------------------------------------------
 # NeuralForecast settings (TFT, TiDE, NBEATSx)
