@@ -117,11 +117,20 @@ MODEL_MARKERS = {
 # Loading
 # ---------------------------------------------------------------------------
 
+_EPOCH_COLS = ["best_epoch", "max_epochs", "epoch_pct_used"]
+
+
 def load_raw(path=None):
     path = path or (_RESULTS / "raw_results.csv")
     if not path.exists():
         raise FileNotFoundError(f"Raw results not found at {path}. Run run.py first.")
-    df = pd.read_csv(path)
+    # Detect file header; older CSVs may be missing the epoch columns because
+    # non-torch rows were written before the schema was normalised.
+    with open(path) as f:
+        file_header = f.readline().strip().split(",")
+    extra = [c for c in _EPOCH_COLS if c not in file_header]
+    all_cols = file_header + extra
+    df = pd.read_csv(path, names=all_cols, skiprows=1)
     df["rho"] = df["rho"].astype(float).round(6)
     df["seed"] = df["seed"].astype(int)
     return df
@@ -395,31 +404,38 @@ def parse_args():
 
 def main():
     args = parse_args()
-    df = load_raw(Path(args.results))
+    results_csv = Path(args.results)
+    df = load_raw(results_csv)
     metric = args.metric
+
+    # All outputs go next to the input CSV, not to a hardcoded path.
+    results_dir = results_csv.parent
+    figures_dir = results_dir / "figures"
+    latex_dir   = results_dir / "latex"
 
     n_seeds = df["seed"].nunique()
     print(f"Loaded {len(df)} rows | {df['effect'].nunique()} effects | "
           f"{df['model'].nunique()} models | {df['rho'].nunique()} rho values | {n_seeds} seeds")
+    print(f"Output dir: {results_dir}")
 
     if not args.no_summary:
         summary = build_summary(df, metric)
-        summary_path = _RESULTS / "summary.csv"
+        summary_path = results_dir / "summary.csv"
         summary.to_csv(summary_path, index=False)
         print(f"Saved: {summary_path}")
 
     if not args.no_figures:
-        _FIGURES.mkdir(parents=True, exist_ok=True)
-        plot_performance_vs_rho(df, metric=metric)
+        figures_dir.mkdir(parents=True, exist_ok=True)
+        plot_performance_vs_rho(df, metric=metric, out_dir=figures_dir)
         for rho in sorted(df["rho"].unique()):
-            plot_heatmap_table(df, rho=rho, metric=metric)
-        plot_epoch_sufficiency(df)
+            plot_heatmap_table(df, rho=rho, metric=metric, out_dir=figures_dir)
+        plot_epoch_sufficiency(df, out_dir=figures_dir)
 
     if not args.no_latex:
-        _LATEX.mkdir(parents=True, exist_ok=True)
+        latex_dir.mkdir(parents=True, exist_ok=True)
         for rho in sorted(df["rho"].unique()):
             tex = latex_table(df, rho=rho, metric=metric)
-            out = _LATEX / f"table_rho{rho:.2f}_{metric}.tex"
+            out = latex_dir / f"table_rho{rho:.2f}_{metric}.tex"
             out.write_text(tex)
             print(f"Saved: {out}")
 

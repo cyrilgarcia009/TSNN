@@ -641,6 +641,10 @@ def main():
                         "model": model_name,
                         **metrics,
                     }
+                    # Ensure epoch columns are always present so every row
+                    # has identical schema (non-torch models get None).
+                    for _col in ("best_epoch", "max_epochs", "epoch_pct_used"):
+                        row.setdefault(_col, None)
                     append_row(raw_path, row)
                     completed.add(key)
 
