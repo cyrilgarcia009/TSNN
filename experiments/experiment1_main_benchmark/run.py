@@ -457,7 +457,7 @@ def make_nf_builders(cfg_nf, seed):
             h=1, input_size=10, futr_exog_list=futr_exog_list,
             exclude_insample_y=False, hidden_size=256, dropout=0.1,
             max_steps=ms, val_check_steps=vc, learning_rate=lr,
-            scaler_type="standard", random_seed=seed, **tr,
+            scaler_type="identity", random_seed=seed, **tr,
         ),
         "NBEATSx": lambda n_series, futr_exog_list: NBEATSx(
             h=1, input_size=10, futr_exog_list=futr_exog_list,
@@ -502,6 +502,40 @@ def parse_args():
     p.add_argument("--rhos", nargs="+", type=float, help="Override rho_values from config")
     p.add_argument("--seeds", nargs="+", type=int, help="Override seeds from config")
     p.add_argument("--models", nargs="+", help="Override models from config")
+    p.add_argument(
+        "--shuffle-cs",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help="Override data.shuffle_cs. Use --no-shuffle-cs for notebook-compatible circular CS shifts.",
+    )
+    p.add_argument(
+        "--max-ts-lag",
+        type=int,
+        help="Override data.max_ts_lag. Use 1 for notebook-compatible fixed lag=1.",
+    )
+    p.add_argument(
+        "--epochs",
+        type=int,
+        help="Override the rho-dependent epoch budget for all selected rhos.",
+    )
+    p.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        help="Override training.early_stopping_patience.",
+    )
+    p.add_argument(
+        "--no-early-stopping",
+        action="store_true",
+        help="Train for the full epoch budget while still restoring the best validation state.",
+    )
+    p.add_argument(
+        "--notebook-protocol",
+        action="store_true",
+        help=(
+            "Use notebook-compatible synthetic settings: fixed TS lag=1 and circular CS shifts. "
+            "Explicit --max-ts-lag or --shuffle-cs/--no-shuffle-cs overrides this."
+        ),
+    )
     p.add_argument("--dry-run", action="store_true", help="Print the run plan without executing")
     return p.parse_args()
 
@@ -532,13 +566,42 @@ def main():
     n_rolling = data_cfg["n_rolling"]
     train_pct = data_cfg["train_pct"]
     batch_size = data_cfg["batch_size"]
-    shuffle_cs = data_cfg["shuffle_cs"]
-    max_ts_lag = data_cfg.get("max_ts_lag", n_rolling)
+    if args.notebook_protocol:
+        shuffle_cs = False
+        max_ts_lag = 1
+    else:
+        shuffle_cs = data_cfg["shuffle_cs"]
+        max_ts_lag = data_cfg.get("max_ts_lag", n_rolling)
+
+    if args.shuffle_cs is not None:
+        shuffle_cs = args.shuffle_cs
+    if args.max_ts_lag is not None:
+        max_ts_lag = args.max_ts_lag
+    if max_ts_lag < 1:
+        raise ValueError("--max-ts-lag must be >= 1")
+    if max_ts_lag > n_rolling - 1:
+        raise ValueError(
+            f"--max-ts-lag={max_ts_lag} is outside the look-back window; "
+            f"with n_rolling={n_rolling}, use at most {n_rolling - 1}."
+        )
+
+    if args.no_early_stopping:
+        early_stopping_patience = None
+    elif args.early_stopping_patience is not None:
+        early_stopping_patience = args.early_stopping_patience
+    else:
+        early_stopping_patience = train_cfg["early_stopping_patience"]
 
     total = len(effects) * len(rhos) * len(seeds)
     print(f"Device: {DEVICE}")
     print(f"Run plan: {len(effects)} effects × {len(rhos)} rhos × {len(seeds)} seeds = {total} datasets")
     print(f"Models per dataset: {model_list}")
+    print(f"Data protocol: shuffle_cs={shuffle_cs} | max_ts_lag={max_ts_lag}")
+    print(
+        "Training protocol: "
+        f"early_stopping_patience={early_stopping_patience} | "
+        f"epochs={'override ' + str(args.epochs) if args.epochs is not None else 'by rho'}"
+    )
     print(f"Results → {raw_path}")
 
     if args.dry_run:
@@ -575,7 +638,9 @@ def main():
                     outer_bar.update(1)
                     continue
 
-                epochs = train_cfg["epochs_by_rho"].get(rho, train_cfg["epochs_by_rho"].get(str(rho), 100))
+                epochs = args.epochs if args.epochs is not None else train_cfg["epochs_by_rho"].get(
+                    rho, train_cfg["epochs_by_rho"].get(str(rho), 100)
+                )
 
                 for model_name in pending:
                     key = (effect, round(rho, 6), seed, model_name)
@@ -599,7 +664,7 @@ def main():
                                 epochs=epochs,
                                 val_pct=train_cfg["val_pct"],
                                 val_warmup_epochs=train_cfg["val_warmup_epochs"],
-                                early_stopping_patience=train_cfg["early_stopping_patience"],
+                                early_stopping_patience=early_stopping_patience,
                                 roll_y=False,
                             )
 
@@ -611,7 +676,7 @@ def main():
                                 epochs=epochs,
                                 val_pct=train_cfg["val_pct"],
                                 val_warmup_epochs=train_cfg["val_warmup_epochs"],
-                                early_stopping_patience=train_cfg["early_stopping_patience"],
+                                early_stopping_patience=early_stopping_patience,
                                 roll_y=True,
                             )
 

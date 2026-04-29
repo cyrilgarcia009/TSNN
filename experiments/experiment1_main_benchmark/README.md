@@ -110,7 +110,17 @@ python experiments/experiment1_main_benchmark/run.py \
 # 2. Full run (reads config.yaml, resumes if interrupted)
 python experiments/experiment1_main_benchmark/run.py
 
-# 3. Analyze results and generate figures + LaTeX tables
+# 3. Notebook-compatible synthetic check — fixed lag=1, circular CS shift
+python experiments/experiment1_main_benchmark/run.py \
+    --notebook-protocol \
+    --seeds 0 \
+    --effects TS_shift CS_shift TSCS_shift fea_cond \
+    --rhos 0.1 \
+    --models TCTC \
+    --epochs 150 \
+    --no-early-stopping
+
+# 4. Analyze results and generate figures + LaTeX tables
 python experiments/experiment1_main_benchmark/analyze.py
 ```
 
@@ -130,7 +140,7 @@ All parameters live in `config.yaml`. Key knobs:
 | `effects` | 8 effects | Which dependency structures to test |
 | `rho_values` | 5 values | SNR grid (0.02 → 0.50) |
 | `seeds` | 0–9 | 10 seeds → mean ± std in tables |
-| `models` | 8 models | Comment out any model to exclude |
+| `models` | 15 models | Comment out any model to exclude |
 | `training.epochs_by_rho` | rho-dependent | More epochs for harder low-SNR problems |
 
 To run a subset, either edit `config.yaml` or pass CLI flags:
@@ -139,6 +149,20 @@ To run a subset, either edit `config.yaml` or pass CLI flags:
 # Only TCTC and Lasso, only two rho values
 python experiments/experiment1_main_benchmark/run.py \
     --models TCTC Lasso --rhos 0.05 0.20
+```
+
+Useful CLI overrides for comparing against notebook runs:
+
+```bash
+# Equivalent data-generation protocol to updated_figures_for_paper.ipynb:
+# fixed temporal lag=1 and circular cross-sectional shift.
+python experiments/experiment1_main_benchmark/run.py --notebook-protocol
+
+# Same controls, spelled out explicitly:
+python experiments/experiment1_main_benchmark/run.py --max-ts-lag 1 --no-shuffle-cs
+
+# Override the rho-dependent epoch budget for the selected run.
+python experiments/experiment1_main_benchmark/run.py --epochs 150 --no-early-stopping
 ```
 
 ## GPU / CPU
