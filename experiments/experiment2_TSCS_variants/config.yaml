@@ -1,0 +1,106 @@
+# Experiment 2 — TSCS Variant Ablation
+# Compares four TSCS_shift variants across all SNR levels.
+# The two axes of variation are:
+#   TS lag  : fixed (=1) vs random (drawn from [1, 9])
+#   CS shift: circular (fixed) vs random derangement
+# This produces 2x2 = 4 named effects handled in run.py.
+
+# ---------------------------------------------------------------------------
+# Data dimensions  (same as Experiment 1)
+# ---------------------------------------------------------------------------
+data:
+  T: 4000
+  n_ts: 10
+  n_f: 5
+  n_rolling: 10
+  train_pct: 0.625
+  batch_size: 256
+  # shuffle_cs / max_ts_lag are NOT used here — each effect variant overrides them.
+
+# ---------------------------------------------------------------------------
+# Effects — the four TSCS variants (decoded in run.py)
+#   First letter = TS lag:  F=fixed(1),  R=random([1,9])
+#   Second letter = CS shift: F=circular, R=random derangement
+# ---------------------------------------------------------------------------
+effects:
+  - TSCS_FF   # fixed lag=1,  circular CS shift
+  - TSCS_FR   # fixed lag=1,  random derangement CS shift
+  - TSCS_RF   # random lag,   circular CS shift
+  - TSCS_RR   # random lag,   random derangement CS shift
+
+# ---------------------------------------------------------------------------
+# Signal-to-noise ratios
+# ---------------------------------------------------------------------------
+rho_values:
+  - 0.02
+  - 0.05
+  - 0.10
+  - 0.20
+  - 0.50
+
+# ---------------------------------------------------------------------------
+# Random seeds
+# ---------------------------------------------------------------------------
+seeds:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+models:
+  - TheoC
+  - Lasso
+  - MLP
+  - GlobalLSTM
+  - TC
+  - CT
+  - TT
+  - CC
+  - TCTC
+  - CTCT
+  - TCTCTC
+  - TCTCTCTC
+  - TFT
+  - TiDE
+  - NBEATSx
+
+# ---------------------------------------------------------------------------
+# Training protocol (same as Experiment 1)
+# ---------------------------------------------------------------------------
+training:
+  val_pct: 0.2
+  val_warmup_epochs: 5
+  early_stopping_patience: 30
+  epochs_by_rho:
+    0.02: 200
+    0.05: 150
+    0.10: 100
+    0.20:  70
+    0.50:  40
+
+# ---------------------------------------------------------------------------
+# NeuralForecast settings (same as Experiment 1)
+# ---------------------------------------------------------------------------
+neuralforecast:
+  max_steps: 300
+  val_check_steps: 50
+  learning_rate: 0.001
+  test_eval_steps: 300
+  val_pct: 0.2
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+output:
+  results_dir: results_TSCS
+  raw_file: raw_results.csv
+  summary_file: summary.csv
